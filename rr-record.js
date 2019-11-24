@@ -3,32 +3,11 @@ LogCanvas = (() => {
 
    // -
 
-   let last_id = 1;
-   function next_id() {
-      last_id += 1;
-      return last_id;
-   }
-
-   function tag_of(obj) {
-      if (obj.tag === undefined) {
-         const name = obj.constructor.name;
-         obj.tag = name + '$' + next_id();
+   class SnapshotT {
+      constructor(key) {
+         this.key = key;
       }
-      return obj.tag;
-   }
-
-   function val_or_tag(x) {
-      if (typeof x === 'object') return tag_of(x);
-      return JSON.stringify(x);
-   }
-
-   function merge_json(x, y) {
-      console.assert(x.endsWith('}'))
-      console.assert(y.startsWith('{'))
-      return x.substring(0, x.length-1) + ',' + y.substring(1);
-   }
-
-   // -
+   };
 
    class Recording {
       // String prefixes:
@@ -36,7 +15,7 @@ LogCanvas = (() => {
       // $: element key
       // ": actual string
       snapshots = {};
-      elem_type_by_key = {};
+      elem_info_by_key = {};
       frames = [];
 
       new_frame() {
@@ -57,7 +36,7 @@ LogCanvas = (() => {
          const id = this.prev_id += 1;
          const key = '@' + id;
          this.snapshots[key] = val;
-         return key;
+         return new SnapshotT(key);
       }
 
       object_key(obj) {
@@ -65,17 +44,25 @@ LogCanvas = (() => {
          if (obj._lc_key === undefined) {
             const id = this.prev_id += 1;
             const key = '$' + id;
-            const type = obj.constructor.name;
-            this.elem_type_by_key[key] = type;
             obj._lc_key = key;
+
+            const info = {};
+            this.elem_info_by_key[key] = info;
+            info.type = obj.constructor.name;
+
+            if (info.type == 'HTMLCanvasElement') {
+               info.width = obj.width;
+               info.height = obj.height;
+            }
          }
          return obj._lc_key;
       }
 
       pickle_arg(arg) {
-         if (!arg) return arg;
          if (typeof arg == 'string') return '"' + arg;
+         if (!arg) return arg;
          if (arg instanceof Array) return arg.map(x => this.pickle_arg(x));
+         if (arg instanceof SnapshotT) return arg.key;
          if (typeof arg == 'object') return this.object_key(arg);
          return arg;
       }
@@ -90,14 +77,14 @@ LogCanvas = (() => {
       to_json_arr() {
          const header_obj = {
             snapshots: this.snapshots,
-            elem_type_by_key: this.elem_type_by_key,
+            elem_info_by_key: this.elem_info_by_key,
          };
          const header_json = JSON.stringify(header_obj, null, 3);
 
          console.assert(header_json.endsWith('\n}'))
          const parts = [header_json.substring(0, header_json.length-2)];
          parts.push(
-            ',\n   frames: ['
+            ',\n   "frames": ['
          );
          let first_time = true;
          for (const frame of this.frames) {
@@ -129,10 +116,14 @@ LogCanvas = (() => {
       }
    };
 
+   const SHOULD_PROXY = {
+      getExtension: true,
+   };
+
    function proxy_observer(inner, fn_observe) {
       const proxy = new Proxy(inner, {
          set: function(obj, k, v) {
-            fn_observe(obj, k, [v]);
+            fn_observe(obj, 'set ' + k, [v]);
             obj[k] = v;
             return true;
          },
@@ -143,7 +134,7 @@ LogCanvas = (() => {
                   this.proxies[k] = function() {
                      let ret = obj[k].apply(obj, arguments);
                      fn_observe(obj, k, arguments, ret);
-                     if (ret && k === 'getExtension') {
+                     if (ret && SHOULD_PROXY[k]) {
                         ret = proxy_observer(ret, fn_observe);
                      }
                      return ret;
@@ -152,11 +143,31 @@ LogCanvas = (() => {
                return this.proxies[k];
             }
             const ret = obj[k];
-            //fn_observe(obj, k, [], ret);
+            //fn_observe(obj, 'get ' + k, [], ret); // Observe getter?
             return ret;
          },
       });
       return proxy;
+   }
+
+   function ensure_proxied(obj, func) {
+      if (!obj) return obj;
+      if (!obj._crr_proxy) {
+         obj._crr_proxy = proxy_observer(obj, func);
+      }
+      return obj._crr_proxy;
+   }
+
+   // -
+
+   function hook_setter(obj, name, fn_observe) {
+      const orig_desc = Object.getOwnPropertyDescriptor(obj, name);
+      const hook_desc = Object.assign({}, orig_desc);
+      hook_desc.set = function(v) {
+         orig_desc.set.call(this, v);
+         fn_observe(this, name, v);
+      };
+      Object.defineProperty(obj, name, hook_desc);
    }
 
    // -
@@ -167,6 +178,8 @@ LogCanvas = (() => {
    // -
 
    function inject_observer() {
+      if (window._CRR_DISABLE) return;
+
       if (HTMLCanvasElement.prototype.getContext.log_canvas) {
          console.log('Ignoring duplicate inject...');
          return;
@@ -176,18 +189,33 @@ LogCanvas = (() => {
       HTMLCanvasElement.prototype.getContext = function() {
          const inner = orig_get_context.apply(this, arguments);
          if (!inner) return inner;
-         if (inner.proxy === undefined) {
-            const canvas_tag = tag_of(this);
-            const tag = tag_of(inner);
-            console.log(`${canvas_tag}.getContext(${arguments[0]}) -> ${tag}`);
-            inner.proxy = proxy_observer(inner, function(obj, k, args, ret) {
-               if (!RECORDING_FRAMES) return;
-               RECORDING.pickle_call(obj, k, args, ret);
-            });
+
+         if (RECORDING_FRAMES) {
+            RECORDING.pickle_call(this, 'getContext', arguments, inner);
          }
-         return inner.proxy;
+
+         return ensure_proxied(inner, function(obj, k, args, ret) {
+            if (!RECORDING_FRAMES) return;
+
+            if (k == 'drawImage') {
+               args = [].slice.call(args);
+               const src = args[0];
+               const val = src.toDataURL();
+               args[0] = RECORDING.snapshot(val);
+            }
+
+            RECORDING.pickle_call(obj, k, args, ret);
+         });
       };
       HTMLCanvasElement.prototype.getContext.log_canvas = true;
+
+      const fn_observe_setter = function(obj, name, v) {
+         if (!RECORDING_FRAMES) return;
+         RECORDING.pickle_call(obj, 'set ' + name, [v]);
+      };
+
+      hook_setter(HTMLCanvasElement.prototype, 'width', fn_observe_setter);
+      hook_setter(HTMLCanvasElement.prototype, 'height', fn_observe_setter);
 
       if (AUTO_RECORD_FRAMES) {
          record_frames(AUTO_RECORD_FRAMES); // Grab initial.

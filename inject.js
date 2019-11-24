@@ -1,5 +1,5 @@
 const s = document.createElement('script');
-const url = browser.runtime.getURL('record.js');
+const url = browser.runtime.getURL('rr-record.js');
 /*
 (async () => {
    const resp = await fetch(url);
