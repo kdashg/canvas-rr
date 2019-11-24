@@ -188,6 +188,8 @@ LogCanvas = (() => {
       const orig_get_context = HTMLCanvasElement.prototype.getContext;
       HTMLCanvasElement.prototype.getContext = function() {
          const inner = orig_get_context.apply(this, arguments);
+         if (window._CRR_DISABLE) return inner;
+
          if (!inner) return inner;
 
          if (RECORDING_FRAMES) {
@@ -237,7 +239,7 @@ LogCanvas = (() => {
 
    function record_frames(n) {
       console.log('[LogCanvas] Recording ' + n + ' frames...');
-      RECORDING_FRAMES = n;
+      RECORDING_FRAMES = n+1;
       RECORDING = new Recording();
 
       function per_frame() {
@@ -251,10 +253,10 @@ LogCanvas = (() => {
             console.log(`[LogCanvas] ${n} frames recorded! (${calls} calls)`);
             return;
          }
-         RECORDING.frames.push([]);
+         RECORDING.new_frame();
          requestAnimationFrame(per_frame);
       }
-      requestAnimationFrame(per_frame);
+      per_frame();
    }
 
    function record_next_frames(n) {
