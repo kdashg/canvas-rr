@@ -3,6 +3,29 @@ LogCanvas = (() => {
 
    // -
 
+   class SplitLogger {
+      prefix = ''
+
+      constructor(desc) {
+         if (desc) {
+            this.prefix = desc + ' '
+         }
+         this.start = performance.now();
+         this.last_split = this.start;
+      }
+
+      log(text) {
+         let now = performance.now();
+         const split_diff = now - this.last_split;
+         const total_diff = now - this.start;
+         console.log(`[${this.prefix}${split_diff|0}/${total_diff|0}ms]`, text);
+         this.last_split = now;
+      }
+   };
+
+
+   // -
+
    class SnapshotT {
       constructor(key) {
          this.key = key;
@@ -75,18 +98,23 @@ LogCanvas = (() => {
       }
 
       to_json_arr() {
+         const slog = new SplitLogger('to_json_arr');
          const header_obj = {
             snapshots: this.snapshots,
             elem_info_by_key: this.elem_info_by_key,
          };
          const header_json = JSON.stringify(header_obj, null, 3);
+         slog.log(`${header_json.length} bytes of header_json.`);
+
 
          console.assert(header_json.endsWith('\n}'))
          const parts = [header_json.substring(0, header_json.length-2)];
+         slog.log(`header_json.substring`);
          parts.push(
             ',\n   "frames": ['
          );
          let first_time = true;
+         let i = 0;
          for (const frame of this.frames) {
             if (!first_time) {
                parts.push(',');
@@ -107,12 +135,29 @@ LogCanvas = (() => {
                parts.push('\n      ');
             }
             parts.push(']');
+            //slog.log(`frame[${i}]`);
+            i += 1;
          }
          parts.push(
             '\n   ]',
             '\n}'
          );
-         return parts;
+
+         // -
+
+         let size = 0;
+         for (const x of parts) {
+            size += x.length;
+         }
+         slog.log(`${size} bytes in ${parts.length} parts...`);
+
+         let join = '';
+         for (const x of parts) {
+            join += x;
+         }
+
+         slog.log(`done`);
+         return [join];
       }
    };
 
@@ -224,7 +269,7 @@ LogCanvas = (() => {
       }
    };
 
-   function download_text_arr(filename, textArr, mimetype='text/plain') {
+   function download_text_arr(dry_run, filename, textArr, mimetype='text/plain') {
       const blob = new Blob(textArr, {type: mimetype});
       const url = URL.createObjectURL(blob);
 
@@ -233,7 +278,9 @@ LogCanvas = (() => {
       link.download = filename;
 
       document.body.appendChild(link);
-      link.click();
+      if (!dry_run) {
+         link.click();
+      }
       document.body.removeChild(link);
    }
 
@@ -265,10 +312,12 @@ LogCanvas = (() => {
       });
    }
 
-   function download() {
-      //const arr = [JSON.stringify(RECORDING, null, 3)];
+   function download(dry_run = false) {
+      const slog = new SplitLogger('download');
       const arr = RECORDING.to_json_arr();
-      download_text_arr('recording.json', arr);
+      dry_run && slog.log(`to_json_arr`);
+      download_text_arr(dry_run, 'recording.json', arr);
+      dry_run && slog.log(`done`);
    }
 
    return {

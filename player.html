@@ -22,28 +22,40 @@ Status: <span id='e_status'>-</span>
 
 let RECORDING = null;
 
-async function file_input_changed(blob) {
-   const start = performance.now();
-   let last_split = start;
+class SplitLogger {
+   prefix = ''
 
-   function log_split(text) {
-      let split = performance.now();
-      const split_diff = split - last_split;
-      const total_diff = split - start;
-      console.log(`[${split_diff|0}/${total_diff|0}ms]`, text);
+   constructor(desc) {
+      if (desc) {
+         this.prefix = desc + ' '
+      }
+      this.start = performance.now();
+      this.last_split = start;
    }
+
+   log(text) {
+      let now = performance.now();
+      const split_diff = now - this.last_split;
+      const total_diff = now - this.start;
+      console.log(`[${this.prefix}${split_diff|0}/${total_diff|0}ms]`, text);
+      this.last_split = now;
+   }
+};
+
+async function file_input_changed(blob) {
+   const slog = new SplitLogger('file_input_changed');
 
    e_status.textContent = 'Reading...';
    const text = await blob.text();
-   log_split(`Read ${text.length} bytes.`);
+   slog.log(`Read ${text.length} bytes.`);
 
    e_status.textContent = 'Parsing...';
    const json = JSON.parse(text);
-   log_split('Parsed.');
+   slog.log('Parsed.');
 
    e_status.textContent = 'Loading...';
    RECORDING = await Recording.from_json(json);
-   log_split(`Loaded ${RECORDING.frames.length} frames.`);
+   slog.log(`Loaded ${RECORDING.frames.length} frames.`);
 
    e_status.textContent = 'Ready.';
 }
