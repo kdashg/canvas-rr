@@ -161,10 +161,6 @@ LogCanvas = (() => {
       }
    };
 
-   const SHOULD_PROXY = {
-      getExtension: true,
-   };
-
    // -
 
    const DONT_HOOK = {
@@ -221,6 +217,10 @@ LogCanvas = (() => {
       HTMLCanvasElement,
       CanvasRenderingContext2D,
    ];
+   const IGNORED_FUNCS = {
+      'toDataURL': true,
+      'getTransform': true,
+   };
 
    function inject_observer() {
       if (window._CRR_NO_INJECT) return;
@@ -230,6 +230,8 @@ LogCanvas = (() => {
 
       function fn_observe(obj, k, args, ret) {
          if (!RECORDING_FRAMES) return;
+
+         if (IGNORED_FUNCS[k]) return;
 
          if (k == 'drawImage') {
             args = [].slice.call(args);
