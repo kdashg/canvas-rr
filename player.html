@@ -4,10 +4,6 @@
       <script src='rr-replay.js'></script>
    </head>
    <body>
-<script>
-window._CRR_DISABLE = true;
-</script>
-
 Recording: <input id='fileInput' type='file' accept='.json'
                   onchange='file_input_changed(this.files[0])'/>
 <br/>
@@ -30,7 +26,7 @@ class SplitLogger {
          this.prefix = desc + ' '
       }
       this.start = performance.now();
-      this.last_split = start;
+      this.last_split = this.start;
    }
 
    log(text) {

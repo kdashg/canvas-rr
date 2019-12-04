@@ -165,55 +165,50 @@ LogCanvas = (() => {
       getExtension: true,
    };
 
-   function proxy_observer(inner, fn_observe) {
-      const proxy = new Proxy(inner, {
-         set: function(obj, k, v) {
-            fn_observe(obj, 'set ' + k, [v]);
-            obj[k] = v;
-            return true;
-         },
-         get: function(obj, k) {
-            this.proxies = {};
-            if (typeof obj[k] == 'function') {
-               if (this.proxies[k] === undefined) {
-                  this.proxies[k] = function() {
-                     let ret = obj[k].apply(obj, arguments);
-                     fn_observe(obj, k, arguments, ret);
-                     if (ret && SHOULD_PROXY[k]) {
-                        ret = proxy_observer(ret, fn_observe);
-                     }
-                     return ret;
-                  };
-               }
-               return this.proxies[k];
-            }
-            const ret = obj[k];
-            //fn_observe(obj, 'get ' + k, [], ret); // Observe getter?
-            return ret;
-         },
-      });
-      return proxy;
-   }
-
-   function ensure_proxied(obj, func) {
-      if (!obj) return obj;
-      if (!obj._crr_proxy) {
-         obj._crr_proxy = proxy_observer(obj, func);
-      }
-      return obj._crr_proxy;
-   }
-
    // -
 
-   function hook_setter(obj, name, fn_observe) {
-      const orig_desc = Object.getOwnPropertyDescriptor(obj, name);
-      const hook_desc = Object.assign({}, orig_desc);
-      hook_desc.set = function(v) {
-         orig_desc.set.call(this, v);
-         fn_observe(this, name, v);
-      };
-      Object.defineProperty(obj, name, hook_desc);
+   const DONT_HOOK = {
+      'constructor': true,
+   };
+
+   function hook_props(obj, fn_observe) {
+      const descs = Object.getOwnPropertyDescriptors(obj);
+
+      for (const k in descs) {
+         if (DONT_HOOK[k]) continue;
+
+         const desc = descs[k];
+         if (desc.set) {
+            //console.log(`hooking setter: ${obj.constructor.name}.${k}`);
+            const was = desc.set;
+            desc.set = function(v) {
+               was.call(this, v);
+               fn_observe(this, 'set ' + k, [v], undefined);
+            };
+            continue;
+         }
+         if (typeof desc.value === 'function') {
+            //console.log(`hooking func: ${obj.constructor.name}.${k}`);
+            const was = desc.value;
+            desc.value = function() {
+               const ret = was.apply(this, arguments);
+               fn_observe(this, k, arguments, ret);
+               return ret;
+            };
+            continue;
+         }
+      }
+
+      Object.defineProperties(obj, descs);
    }
+
+   /*
+   function log_observe(obj, name, args, ret) {
+      console.log(`${obj.constructor.name}.${name}(${JSON.stringify([].slice.call(args))}) -> ${ret}`);
+   }
+   hook_props(HTMLCanvasElement.prototype, log_observe);
+   hook_props(CanvasRenderingContext2D.prototype, log_observe);
+   */
 
    // -
 
@@ -222,47 +217,33 @@ LogCanvas = (() => {
 
    // -
 
+   const HOOK_LIST = [
+      HTMLCanvasElement,
+      CanvasRenderingContext2D,
+   ];
+
    function inject_observer() {
-      if (window._CRR_DISABLE) return;
+      if (window._CRR_NO_INJECT) return;
+      window._CRR_NO_INJECT = true;
 
-      if (HTMLCanvasElement.prototype.getContext.log_canvas) {
-         console.log('Ignoring duplicate inject...');
-         return;
-      }
-      console.log('injecting into', window.location, '...');
-      const orig_get_context = HTMLCanvasElement.prototype.getContext;
-      HTMLCanvasElement.prototype.getContext = function() {
-         const inner = orig_get_context.apply(this, arguments);
-         if (window._CRR_DISABLE) return inner;
+      console.log(`[LogCanvas@${window.origin}] Injecting for`, window.location);
 
-         if (!inner) return inner;
+      function fn_observe(obj, k, args, ret) {
+         if (!RECORDING_FRAMES) return;
 
-         if (RECORDING_FRAMES) {
-            RECORDING.pickle_call(this, 'getContext', arguments, inner);
+         if (k == 'drawImage') {
+            args = [].slice.call(args);
+            const src = args[0];
+            const val = src.toDataURL();
+            args[0] = RECORDING.snapshot(val);
          }
 
-         return ensure_proxied(inner, function(obj, k, args, ret) {
-            if (!RECORDING_FRAMES) return;
+         RECORDING.pickle_call(obj, k, args, ret);
+      }
 
-            if (k == 'drawImage') {
-               args = [].slice.call(args);
-               const src = args[0];
-               const val = src.toDataURL();
-               args[0] = RECORDING.snapshot(val);
-            }
-
-            RECORDING.pickle_call(obj, k, args, ret);
-         });
-      };
-      HTMLCanvasElement.prototype.getContext.log_canvas = true;
-
-      const fn_observe_setter = function(obj, name, v) {
-         if (!RECORDING_FRAMES) return;
-         RECORDING.pickle_call(obj, 'set ' + name, [v]);
-      };
-
-      hook_setter(HTMLCanvasElement.prototype, 'width', fn_observe_setter);
-      hook_setter(HTMLCanvasElement.prototype, 'height', fn_observe_setter);
+      for (const cur of HOOK_LIST) {
+         hook_props(cur.prototype, fn_observe);
+      }
 
       if (AUTO_RECORD_FRAMES) {
          record_frames(AUTO_RECORD_FRAMES); // Grab initial.
@@ -285,7 +266,7 @@ LogCanvas = (() => {
    }
 
    function record_frames(n) {
-      console.log('[LogCanvas] Recording ' + n + ' frames...');
+      console.log(`[LogCanvas@${window.origin}] Recording ${n} frames...`);
       RECORDING_FRAMES = n+1;
       RECORDING = new Recording();
 
@@ -297,7 +278,7 @@ LogCanvas = (() => {
             RECORDING.frames.forEach(frame_calls => {
                calls += frame_calls.length;
             });
-            console.log(`[LogCanvas] ${n} frames recorded! (${calls} calls)`);
+            console.log(`[LogCanvas@${window.origin}] ${n} frames recorded! (${calls} calls)`);
             return;
          }
          RECORDING.new_frame();

@@ -99,7 +99,9 @@ class Recording {
       if (func_name.startsWith('set ')) {
          const setter_name = func_name.substring(4);
          obj[setter_name] = call_args[0];
-         console.log(`${obj}.${setter_name} = ${call_args[0]}`);
+         if (window._CRR_REPLAY_SPEW) {
+            console.log(`${obj}.${setter_name} = ${call_args[0]}`);
+         }
          return;
       }
       const func = obj[func_name];
@@ -107,7 +109,9 @@ class Recording {
          console.log("Warning: Missing func: " + obj.constructor.name + '.' + func_name);
          return;
       }
-      console.log(`${obj}.${func_name}(${call_args})`);
+      if (window._CRR_REPLAY_SPEW) {
+         console.log(`${obj}.${func_name}(${call_args})`);
+      }
       const call_ret = func.apply(obj, call_args);
       if (ret && typeof ret == 'string') {
          if (ret[0] == '$') {
