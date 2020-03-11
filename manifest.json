@@ -1,12 +1,12 @@
 {
    "manifest_version": 2,
    "name": "canvas-rr",
-   "version": "0.3",
+   "version": "0.4",
 
    "content_scripts": [
       {
-        "matches": ["https://*/*", "file://*/*"],
-        "js": ["inject.js"],
+        "matches": ["https://*/*", "http://*/*", "file://*/*"],
+        "js": ["out/rr-record.content.js"],
         "run_at": "document_start",
         "all_frames": true
       }
