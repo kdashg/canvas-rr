@@ -42,10 +42,11 @@ async function file_input_changed(blob) {
    const slog = new SplitLogger('file_input_changed');
 
    e_status.textContent = 'Reading...';
-   const text = await blob.text();
+   let text = await blob.text();
    slog.log(`Read ${text.length} bytes.`);
 
    e_status.textContent = 'Parsing...';
+   text = text.replace(/\n *\/\/.*/g, '\n');
    const json = JSON.parse(text);
    slog.log('Parsed.');
 
