@@ -1,5 +1,6 @@
 LogCanvas = (() => {
    const AUTO_RECORD_FRAMES = 60;
+   const SKIP_EMPTY_FRAMES = true;
 
    // -
 
@@ -26,11 +27,25 @@ LogCanvas = (() => {
 
    // -
 
-   class SnapshotT {
-      constructor(key) {
-         this.key = key;
-      }
-   };
+   const TO_DATA_URL_C2D = (() => {
+      const c = document.createElement('canvas');
+      c._CRR_IGNORE = true;
+      const c2d = c.getContext('2d');
+      c2d._CRR_IGNORE = true;
+      return c2d;
+   })();
+
+   function to_data_url(src) {
+      if (src.toDataURL) return src.toDataURL();
+
+      const c2d = TO_DATA_URL_C2D;
+      c2d.canvas.width = src.naturalWidth || src.videoWidth || src.width;
+      c2d.canvas.height = src.naturalHeight || src.videoHeight || src.height;
+      c2d.drawImage(src, 0, 0);
+      return c2d.canvas.toDataURL();
+   }
+
+   // -
 
    class Recording {
       // String prefixes:
@@ -55,51 +70,85 @@ LogCanvas = (() => {
          frame.push(call);
       }
 
-      prev_id = 0;
-      snapshot(val) {
-         let ret = this.snapshots_by_val[val];
-         if (!ret) {
-            const id = this.prev_id += 1;
-            const key = '@' + id;
-            this.snapshots[key] = val;
-            ret = this.snapshots_by_val[val] = new SnapshotT(key);
-         }
-         return ret;
+      last_id = 0;
+
+      new_id() {
+         return this.last_id += 1;
       }
 
-      object_key(obj) {
-         if (!obj) return null;
-         if (obj._lc_key === undefined) {
-            const id = this.prev_id += 1;
-            const key = '$' + id;
-            obj._lc_key = key;
+      snapshot_str(obj) {
+         const type = obj.constructor.name;
 
-            const info = {};
-            this.elem_info_by_key[key] = info;
-            info.type = obj.constructor.name;
-
-            if (info.type == 'HTMLCanvasElement') {
-               info.width = obj.width;
-               info.height = obj.height;
-            }
-            if (obj.canvas) {
-               info.canvas = this.object_key(obj.canvas);
-            }
+         if (obj instanceof ArrayBuffer) {
+            const arr = new Uint8Array(obj);
+            return type + ':' + arr.toString();
          }
-         return obj._lc_key;
+         if (obj instanceof DataView) {
+            const arr = new Uint8Array(obj.buffer);
+            return type + ':' + arr.toString();
+         }
+         if (obj.buffer instanceof ArrayBuffer) {
+            return type + ':' + obj.toString();
+         }
+
+         switch (type) {
+         case 'HTMLCanvasElement':
+         case 'HTMLImageElement':
+         case 'HTMLVideoElement':
+            return to_data_url(obj);
+         }
+         return undefined;
+      }
+
+      obj_key(obj) {
+         if (obj._lc_key) return obj._lc_key;
+
+         const key = obj._lc_key = '$' + this.new_id();
+
+         const info = {
+            type: obj.constructor.name,
+         };
+         if (info.type == 'HTMLCanvasElement') {
+            info.width = obj.width;
+            info.height = obj.height;
+            this.elem_info_by_key[key] = info;
+         }
+         return key;
+      }
+
+      pickle_obj(obj) {
+         if (!obj) return null;
+
+         if (obj._lc_key) return obj._lc_key;
+
+         const val_str = this.snapshot_str(obj);
+         if (val_str) {
+            // Snapshot instead of object key.
+            const prev_key = obj._lc_snapshot_key;
+            if (prev_key) {
+               // Has previous snapshot, but data might have changed.
+               const prev_val_str = this.snapshots[prev_key];
+               if (val_str == prev_val_str) return prev_key;
+            }
+
+            const key = obj._lc_snapshot_key = '@' + this.new_id();
+            this.snapshots[key] = val_str;
+            return key;
+         }
+
+         return this.obj_key(obj);
       }
 
       pickle_arg(arg) {
          if (typeof arg == 'string') return '"' + arg;
          if (!arg) return arg;
          if (arg instanceof Array) return arg.map(x => this.pickle_arg(x));
-         if (arg instanceof SnapshotT) return arg.key;
-         if (typeof arg == 'object') return this.object_key(arg);
+         if (typeof arg == 'object') return this.pickle_obj(arg);
          return arg;
       }
 
       pickle_call(obj, func_name, call_args, call_ret) {
-         const obj_key = this.object_key(obj);
+         const obj_key = this.obj_key(obj);
          const args = [].map.call(call_args, x => this.pickle_arg(x));
          const ret = this.pickle_arg(call_ret);
          this.new_call(obj_key, func_name, args, ret);
@@ -231,6 +280,7 @@ LogCanvas = (() => {
    const IGNORED_FUNCS = {
       'toDataURL': true,
       'getTransform': true,
+      'getParameter': true,
    };
 
    function inject_observer() {
@@ -244,36 +294,6 @@ LogCanvas = (() => {
          if (!RECORDING_FRAMES) return;
 
          if (IGNORED_FUNCS[k]) return;
-
-         if (k == 'drawImage') {
-            args = [].slice.call(args);
-            const src = args[0];
-
-            if (!src.toDataURL) {
-               const c = document.createElement('canvas');
-               c._CRR_IGNORE = true;
-               const c2d = c.getContext('2d');
-               c2d._CRR_IGNORE = true;
-
-               src.toDataURL = function() {
-                  c.width = src.naturalWidth || src.videoWidth || src.width;
-                  c.height = src.naturalHeight || src.videoHeight || src.height;
-                  c2d.drawImage(src, 0, 0);
-                  return c.toDataURL();
-               };
-            }
-
-            let snapshot = src._cached_snapshot;
-            if (snapshot === undefined) {
-               const val = src.toDataURL();
-               snapshot = RECORDING.snapshot(val);
-               if (src instanceof HTMLImageElement) {
-                  src._cached_snapshot = snapshot;
-               }
-            }
-
-            args[0] = snapshot;
-         }
 
          RECORDING.pickle_call(obj, k, args, ret);
       }
@@ -308,6 +328,11 @@ LogCanvas = (() => {
       RECORDING = new Recording();
 
       function per_frame() {
+         const cur_frame = RECORDING.frames[RECORDING.frames.length-1];
+         if (SKIP_EMPTY_FRAMES && cur_frame && !cur_frame.length) {
+            requestAnimationFrame(per_frame);
+            return;
+         }
          RECORDING_FRAMES -= 1;
          RECORDING_FRAMES |= 0;
          if (!RECORDING_FRAMES) {

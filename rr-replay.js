@@ -14,11 +14,32 @@ class Recording {
 
       const decode_proms = [];
       for (const k in ret.snapshots) {
-         const v = ret.snapshots[k];
-         const elem = document.createElement('img');
-         elem.src = v;
-         decode_proms.push(elem.decode());
-         ret.snapshots[k] = elem;
+         const str = ret.snapshots[k];
+         const obj = (() => {
+            if (str.startsWith('data:')) {
+               const elem = document.createElement('img');
+               elem.src = str;
+               decode_proms.push(elem.decode());
+               return elem;
+            }
+
+            let [type, data] = str.split(':');
+            console.log(data);
+            data = JSON.parse('[' + data + ']');
+
+            if (type === 'ArrayBuffer') {
+               const typed = new Uint8Array(data);
+               return typed.buffer;
+            }
+            if (type === 'DataView') {
+               const typed = new Uint8Array(data);
+               return new DataView(typed.buffer);
+            }
+
+            const ctor = window[type];
+            return new ctor(data);
+         })();
+         ret.snapshots[k] = obj;
       }
       await Promise.all(decode_proms);
 
@@ -94,6 +115,8 @@ class Recording {
    play_call(element_map, frame_id, call_id) {
       const call = this.frames[frame_id][call_id];
       const [elem_key, func_name, args, ret] = call;
+      //console.log(call);
+
       let obj = window;
       if (elem_key) {
          obj = element_map[elem_key];
