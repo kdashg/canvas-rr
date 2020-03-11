@@ -70,6 +70,7 @@ function reset_button() {
 
    for (const k in elem_map) {
       const elem = elem_map[k];
+      if (elem.constructor.name != 'HTMLCanvasElement') continue;
 
       const e_elem_title = document.createElement('div');
       e_elem_title.textContent = k + ':';

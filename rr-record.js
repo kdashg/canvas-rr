@@ -38,6 +38,7 @@ LogCanvas = (() => {
       // $: element key
       // ": actual string
       snapshots = {};
+      snapshots_by_val = {};
       elem_info_by_key = {};
       frames = [];
 
@@ -56,10 +57,14 @@ LogCanvas = (() => {
 
       prev_id = 0;
       snapshot(val) {
-         const id = this.prev_id += 1;
-         const key = '@' + id;
-         this.snapshots[key] = val;
-         return new SnapshotT(key);
+         let ret = this.snapshots_by_val[val];
+         if (!ret) {
+            const id = this.prev_id += 1;
+            const key = '@' + id;
+            this.snapshots[key] = val;
+            ret = this.snapshots_by_val[val] = new SnapshotT(key);
+         }
+         return ret;
       }
 
       object_key(obj) {
@@ -76,6 +81,9 @@ LogCanvas = (() => {
             if (info.type == 'HTMLCanvasElement') {
                info.width = obj.width;
                info.height = obj.height;
+            }
+            if (obj.canvas) {
+               info.canvas = this.object_key(obj.canvas);
             }
          }
          return obj._lc_key;
@@ -216,6 +224,9 @@ LogCanvas = (() => {
    const HOOK_LIST = [
       HTMLCanvasElement,
       CanvasRenderingContext2D,
+      Path2D,
+      WebGLRenderingContext,
+      WebGL2RenderingContext,
    ];
    const IGNORED_FUNCS = {
       'toDataURL': true,
@@ -229,6 +240,7 @@ LogCanvas = (() => {
       console.log(`[LogCanvas@${window.origin}] Injecting for`, window.location);
 
       function fn_observe(obj, k, args, ret) {
+         if (obj._CRR_IGNORE) return;
          if (!RECORDING_FRAMES) return;
 
          if (IGNORED_FUNCS[k]) return;
@@ -236,8 +248,31 @@ LogCanvas = (() => {
          if (k == 'drawImage') {
             args = [].slice.call(args);
             const src = args[0];
-            const val = src.toDataURL();
-            args[0] = RECORDING.snapshot(val);
+
+            if (!src.toDataURL) {
+               const c = document.createElement('canvas');
+               c._CRR_IGNORE = true;
+               const c2d = c.getContext('2d');
+               c2d._CRR_IGNORE = true;
+
+               src.toDataURL = function() {
+                  c.width = src.naturalWidth || src.videoWidth || src.width;
+                  c.height = src.naturalHeight || src.videoHeight || src.height;
+                  c2d.drawImage(src, 0, 0);
+                  return c.toDataURL();
+               };
+            }
+
+            let snapshot = src._cached_snapshot;
+            if (snapshot === undefined) {
+               const val = src.toDataURL();
+               snapshot = RECORDING.snapshot(val);
+               if (src instanceof HTMLImageElement) {
+                  src._cached_snapshot = snapshot;
+               }
+            }
+
+            args[0] = snapshot;
          }
 
          RECORDING.pickle_call(obj, k, args, ret);

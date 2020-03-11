@@ -27,16 +27,36 @@ class Recording {
 
    make_elems() {
       const elem_map = {};
-      for (const k in this.elem_info_by_key) {
-         const info = this.elem_info_by_key[k];
+
+      const outer = this;
+
+      function make_elem(k) {
+         let elem = elem_map[k];
+         if (elem !== undefined) return elem;
+
+         const info = outer.elem_info_by_key[k];
          if (info.type == 'HTMLCanvasElement') {
-            const elem = document.createElement('canvas');
+            elem = document.createElement('canvas');
             elem.width = info.width;
             elem.height = info.height;
-            elem_map[k] = elem;
-            continue;
+         } else if (info.type == 'CanvasRenderingContext2D') {
+            if (info.canvas) {
+               const c = make_elem(info.canvas);
+               elem = c.getContext('2d');
+            }
+         } else if (info.type == 'CanvasRenderingContextGL2D') {
+            if (info.canvas) {
+               const c = make_elem(info.canvas);
+               elem = c.getContext('gl-2d');
+            }
+         } else {
+            console.log('Warning: Unrecognized elem_info_by_key[k].type:', info.type);
          }
-         console.log('Warning: Unrecognized elem_info_by_key[k].type:', info.type);
+         return elem_map[k] = elem;
+      }
+
+      for (const k in this.elem_info_by_key) {
+         make_elem(k);
       }
       return elem_map;
    }
@@ -57,11 +77,12 @@ class Recording {
          this.play_calls(element_map, frame_id, call_id);
          call_id = 0;
       }
+      if (frame_id >= this.frames.length) return;
       this.play_calls(element_map, frame_id, call_id, end[1]);
    }
 
    play_calls(element_map, frame_id, call_begin, call_end) {
-      console.log(`play_calls(${[].slice.call(arguments)})`);
+      //console.log(`play_calls(${[].slice.call(arguments)})`);
       call_end = call_end || Infinity;
       const frame = this.frames[frame_id];
       for (let i = call_begin; i < call_end; ++i) {
