@@ -24,7 +24,6 @@ class Recording {
             }
 
             let [type, data] = str.split(':');
-            console.log(data);
             data = JSON.parse('[' + data + ']');
 
             if (type === 'ArrayBuffer') {
