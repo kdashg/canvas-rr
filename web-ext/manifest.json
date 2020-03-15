@@ -1,7 +1,7 @@
 {
    "manifest_version": 2,
    "name": "canvas-rr",
-   "version": "0.4",
+   "version": "0.5",
 
    "content_scripts": [
       {
@@ -10,9 +10,5 @@
         "run_at": "document_start",
         "all_frames": true
       }
-   ],
-
-   "web_accessible_resources": [
-      "rr-record.js"
    ]
 }
