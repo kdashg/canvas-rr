@@ -12,7 +12,9 @@ def from_script(src):
    src = to_js_string(src)
 
    dest = [b'''
-{
+(() => {
+   if (!(document instanceof HTMLDocument)) return;
+
    const script = document.createElement('script');
    script.textContent = escaped_file(); // Move this big string to the end.
    document.documentElement.append(script);
@@ -20,7 +22,7 @@ def from_script(src):
    function escaped_file() {
       return ''', src, b''';
    }
-}
+})();
    ''']
    return b''.join(dest)
 
