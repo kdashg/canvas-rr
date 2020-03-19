@@ -1,5 +1,5 @@
 LogCanvas = (() => {
-   const AUTO_RECORD_FRAMES = 60;
+   const AUTO_RECORD_FRAMES = 60 * 60;
    const SKIP_EMPTY_FRAMES = true;
 
    // -
@@ -35,14 +35,38 @@ LogCanvas = (() => {
       return c2d;
    })();
 
-   function to_data_url(src) {
+   function to_data_url(src, w, h) {
       if (src.toDataURL) return src.toDataURL();
 
+      w = w || src.naturalWidth || src.videoWidth || src.width;
+      h = h || src.naturalHeight || src.videoHeight || src.height;
+      while (Math.max(w, h) >= 16384) { // Too large for Firefox.
+         w = (w >> 1) || 1;
+         h = (h >> 1) || 1;
+      }
+
       const c2d = TO_DATA_URL_C2D;
-      c2d.canvas.width = src.naturalWidth || src.videoWidth || src.width;
-      c2d.canvas.height = src.naturalHeight || src.videoHeight || src.height;
-      c2d.drawImage(src, 0, 0);
-      return c2d.canvas.toDataURL();
+      c2d.canvas.width = w;
+      c2d.canvas.height = h;
+      c2d.drawImage(src, 0, 0, w, h);
+
+      const ret = c2d.canvas.toDataURL();
+      if (ret == "data:,") throw 0; // Encoder failed.
+
+      if (src instanceof HTMLImageElement) {
+         src.toDataURL = function() {
+            return ret;
+         };
+
+         src.addEventListener('load', e => {
+            src.toDataURL = undefined;
+         }, {
+            capture: false,
+            once: true,
+         });
+      }
+
+      return ret;
    }
 
    // -
@@ -76,7 +100,7 @@ LogCanvas = (() => {
          return this.last_id += 1;
       }
 
-      snapshot_str(obj) {
+      snapshot_str(obj, w, h) {
          const type = obj.constructor.name;
 
          if (obj instanceof ArrayBuffer) {
@@ -95,7 +119,7 @@ LogCanvas = (() => {
          case 'HTMLCanvasElement':
          case 'HTMLImageElement':
          case 'HTMLVideoElement':
-            return to_data_url(obj);
+            return to_data_url(obj, w, h);
          }
          return undefined;
       }
@@ -116,12 +140,12 @@ LogCanvas = (() => {
          return key;
       }
 
-      pickle_obj(obj) {
+      pickle_obj(obj, w, h) {
          if (!obj) return null;
 
          if (obj._lc_key) return obj._lc_key;
 
-         const val_str = this.snapshot_str(obj);
+         const val_str = this.snapshot_str(obj, w, h);
          if (val_str) {
             // Snapshot instead of object key.
             const prev_key = obj._lc_snapshot_key;

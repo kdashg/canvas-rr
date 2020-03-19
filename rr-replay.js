@@ -14,31 +14,38 @@ class Recording {
 
       const decode_proms = [];
       for (const k in ret.snapshots) {
-         const str = ret.snapshots[k];
-         const obj = (() => {
-            if (str.startsWith('data:')) {
-               const elem = document.createElement('img');
-               elem.src = str;
-               decode_proms.push(elem.decode());
-               return elem;
-            }
+         decode_proms.push( (async () => {
+            const str = ret.snapshots[k];
+            const obj = await (async () => {
+               if (str.startsWith('data:')) {
+                  const elem = document.createElement('img');
+                  elem.src = str;
+                  try {
+                     await elem.decode();
+                  } catch (e) {
+                     console.error('Failed to load:', elem, 'str:', str);
+                     //throw e;
+                  }
+                  return elem;
+               }
 
-            let [type, data] = str.split(':');
-            data = JSON.parse('[' + data + ']');
+               let [type, data] = str.split(':');
+               data = JSON.parse('[' + data + ']');
 
-            if (type === 'ArrayBuffer') {
-               const typed = new Uint8Array(data);
-               return typed.buffer;
-            }
-            if (type === 'DataView') {
-               const typed = new Uint8Array(data);
-               return new DataView(typed.buffer);
-            }
+               if (type === 'ArrayBuffer') {
+                  const typed = new Uint8Array(data);
+                  return typed.buffer;
+               }
+               if (type === 'DataView') {
+                  const typed = new Uint8Array(data);
+                  return new DataView(typed.buffer);
+               }
 
-            const ctor = window[type];
-            return new ctor(data);
-         })();
-         ret.snapshots[k] = obj;
+               const ctor = window[type];
+               return new ctor(data);
+            })();
+            ret.snapshots[k] = obj;
+         })() );
       }
       await Promise.all(decode_proms);
 
@@ -153,7 +160,7 @@ class Recording {
          return;
       }
       if (window._CRR_REPLAY_SPEW) {
-         console.log(`${obj}.${func_name}(${call_args})`);
+         console.log(`${obj}.${func_name}(`, ...call_args, `)`);
       }
       const call_ret = func.apply(obj, call_args);
       if (ret && typeof ret == 'string') {
