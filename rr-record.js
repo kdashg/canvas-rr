@@ -1,6 +1,8 @@
 LogCanvas = (() => {
    const AUTO_RECORD_FRAMES = 60 * 60;
    const SKIP_EMPTY_FRAMES = true;
+   const SNAPSHOT_LINE_WRAP = 100;
+   const MAX_SNAPSHOT_SIZE = 16384;
 
    // -
 
@@ -9,7 +11,7 @@ LogCanvas = (() => {
 
       constructor(desc) {
          if (desc) {
-            this.prefix = desc + ' '
+            this.prefix = desc + ' ';
          }
          this.start = performance.now();
          this.last_split = this.start;
@@ -23,7 +25,6 @@ LogCanvas = (() => {
          this.last_split = now;
       }
    };
-
 
    // -
 
@@ -40,7 +41,7 @@ LogCanvas = (() => {
 
       w = w || src.naturalWidth || src.videoWidth || src.width;
       h = h || src.naturalHeight || src.videoHeight || src.height;
-      while (Math.max(w, h) >= 16384) { // Too large for Firefox.
+      while (Math.max(w, h) >= MAX_SNAPSHOT_SIZE) { // Too large for Firefox.
          w = (w >> 1) || 1;
          h = (h >> 1) || 1;
       }
@@ -180,48 +181,62 @@ LogCanvas = (() => {
 
       to_json_arr() {
          const slog = new SplitLogger('to_json_arr');
-         const header_obj = {
-            snapshots: this.snapshots,
-            elem_info_by_key: this.elem_info_by_key,
-         };
-         const header_json = JSON.stringify(header_obj, null, 3);
-         slog.log(`${header_json.length} bytes of header_json.`);
 
+         const elem_info_json = JSON.stringify(this.elem_info_by_key, null, 3);
+         slog.log(`${elem_info_json.length} bytes of elem_info_json.`);
 
-         console.assert(header_json.endsWith('\n}'))
-         const parts = [header_json.substring(0, header_json.length-2)];
-         slog.log(`header_json.substring`);
-         parts.push(
-            ',\n   "frames": ['
-         );
-         let first_time = true;
-         let i = 0;
-         for (const frame of this.frames) {
-            if (!first_time) {
-               parts.push(',');
+         function chunk(src, chunk_size) {
+            const ret = [];
+            let pos = 0;
+            while (pos < src.length) {
+               const end = pos + chunk_size;
+               ret.push(src.slice(pos, end));
+               pos = end;
             }
-            first_time = false;
+            return ret;
+         }
 
-            parts.push('\n      [');
+         const parts = [];
+         parts.push(
+            '{', // begin root object
+            `\n"elem_info_by_key": ${elem_info_json},`,
+            '\n"frames": [', // begin frames
+            '\n   ['         // begin frame
+         );
+
+         let add_comma = false;
+         for (const [i, frame] of Object.entries(this.frames)) {
+            if (add_comma) {
+               parts.push('\n   ],[');
+            }
+            add_comma = true;
+
             if (frame.length) {
-               let first_time2 = true;
+               let add_comma2 = false;
                for (const call of frame) {
-                  if (!first_time2) {
+                  if (add_comma2) {
                      parts.push(',');
                   }
-                  first_time2 = false;
+                  add_comma2 = true;
 
-                  parts.push('\n         ', JSON.stringify(call));
+                  parts.push('\n      ', JSON.stringify(call));
                }
-               parts.push('\n      ');
             }
-            parts.push(']');
-            //slog.log(`frame[${i}]`);
-            i += 1;
          }
+
+         const chunked_snapshots = {};
+         for (const [k, v] of Object.entries(this.snapshots)) {
+            chunked_snapshots[k] = chunk(v, SNAPSHOT_LINE_WRAP);
+         }
+         const snapshots_json = JSON.stringify(chunked_snapshots, null, 3);
+
          parts.push(
-            '\n   ]',
-            '\n}'
+            '\n   ]', // end of frame
+            '\n],',    // end of frames
+            '\n"snapshots": ',
+            snapshots_json,
+            '\n}', // end of root object
+            '\n'
          );
 
          // -

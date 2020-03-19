@@ -15,7 +15,7 @@ class Recording {
       const decode_proms = [];
       for (const k in ret.snapshots) {
          decode_proms.push( (async () => {
-            const str = ret.snapshots[k];
+            const str = ret.snapshots[k].join('');
             const obj = await (async () => {
                if (str.startsWith('data:')) {
                   const elem = document.createElement('img');
