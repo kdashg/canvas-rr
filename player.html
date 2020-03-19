@@ -46,7 +46,7 @@ async function file_input_changed(blob) {
    slog.log(`Read ${text.length} bytes.`);
 
    e_status.textContent = 'Parsing...';
-   text = text.replace(/\n *\/\/.*/g, '\n');
+   text = text.replace(/\n *\/\/.*/g, '\n'); // Strip non-spec json comments
    const json = JSON.parse(text);
    slog.log('Parsed.');
 
@@ -63,7 +63,11 @@ function remove_all_children(elem) {
    }
 }
 
+let NOW_PLAYING = {};
+
 function reset_button() {
+   NOW_PLAYING.stop = true;
+
    remove_all_children(e_sandbox);
 
    const elem_map = RECORDING.make_elems();
@@ -82,9 +86,29 @@ function reset_button() {
    }
 }
 
-function play_button() {
+function awaitAnimationFrame() {
+   return new Promise(fn => {
+      requestAnimationFrame(() => {
+         fn();
+      });
+   });
+}
+
+
+async function play_button() {
    reset_button();
-   RECORDING.play(RECORDING.elem_map, 0);
+
+   const state = {
+      stop: false,
+   };
+   NOW_PLAYING = state;
+
+   for (let i = 0; i < RECORDING.frames.length; ++i) {
+      await awaitAnimationFrame();
+      if (state.stop) return;
+
+      RECORDING.play(RECORDING.elem_map, i, i+1);
+   }
 }
 
 </script>
