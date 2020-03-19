@@ -126,6 +126,7 @@ LogCanvas = (() => {
       }
 
       obj_key(obj) {
+         if (!obj) return null;
          if (obj._lc_key) return obj._lc_key;
 
          const key = obj._lc_key = '$' + this.new_id();
@@ -316,6 +317,9 @@ LogCanvas = (() => {
       WebGLRenderingContext,
       WebGL2RenderingContext,
    ];
+   const HOOK_CTOR_LIST = [
+      Path2D,
+   ];
    const IGNORED_FUNCS = {
       'toDataURL': true,
       'getTransform': true,
@@ -339,6 +343,18 @@ LogCanvas = (() => {
 
       for (const cur of HOOK_LIST) {
          hook_props(cur.prototype, fn_observe);
+      }
+
+      for (const cur of HOOK_CTOR_LIST) {
+         const name = cur.prototype.constructor.name;
+         const hook_class = class extends cur {
+            constructor() {
+               super(...arguments);
+               RECORDING.pickle_call(null, 'new ' + name, arguments, this);
+            }
+         };
+         hook_class.prototype.constructor.name = name;
+         window[name] = hook_class;
       }
 
       if (AUTO_RECORD_FRAMES) {

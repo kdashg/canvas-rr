@@ -154,13 +154,29 @@ class Recording {
          }
          return;
       }
+
+      if (func_name.startsWith('new ')) {
+         const class_name = func_name.substring(4);
+         if (window._CRR_REPLAY_SPEW) {
+            console.log(`${ret} = new ${class_name}(`, ...call_args, `)`);
+         }
+         const func = window[class_name];
+         const call_ret = new func(...call_args);
+         console.assert(ret[0] == '$');
+         element_map[ret] = call_ret;
+         return call_ret;
+      }
       const func = obj[func_name];
       if (!func) {
          console.log("Warning: Missing func: " + obj.constructor.name + '.' + func_name);
          return;
       }
       if (window._CRR_REPLAY_SPEW) {
-         console.log(`${obj}.${func_name}(`, ...call_args, `)`);
+         let pre = '';
+         if (ret) {
+            pre = `${ret} = `;
+         }
+         console.log(`${pre}${obj}.${func_name}(`, ...call_args, `)`);
       }
       const call_ret = func.apply(obj, call_args);
       if (ret && typeof ret == 'string') {
