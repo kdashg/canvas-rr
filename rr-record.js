@@ -122,6 +122,9 @@ LogCanvas = (() => {
          case 'HTMLVideoElement':
             return to_data_url(obj, w, h);
          }
+         if (type.startsWith('WebGL')) return undefined;
+
+         console.error(`[LogCanvas@${window.origin}] Warning: Unrecognized type "${type}" in snapshot_str.`, obj);
          return undefined;
       }
 
@@ -339,6 +342,14 @@ LogCanvas = (() => {
          if (IGNORED_FUNCS[k]) return;
 
          RECORDING.pickle_call(obj, k, args, ret);
+
+         if (k == 'getExtension') {
+            if (ret && !ret.__proto__._CRR_HOOKED) {
+               //console.log(`[LogCanvas@${window.origin}] getExtension`, args);
+               ret.__proto__._CRR_HOOKED = true;
+               hook_props(ret.__proto__, fn_observe);
+            }
+         }
       }
 
       for (const cur of HOOK_LIST) {
