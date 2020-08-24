@@ -1,5 +1,7 @@
 'use strict';
 
+const RECORDING_VERSION = 1;
+
 class Recording {
    // String prefixes:
    // @: snapshot key
@@ -11,6 +13,10 @@ class Recording {
 
    static async from_json(json) {
       const ret = Object.assign(new Recording(), json);
+      ret.version = json.version;
+      if (ret.version != RECORDING_VERSION) {
+         console.error(`Warning: Recording has version:${ret.version}, but decoder has version ${RECORDING_VERSION}!`);
+      }
 
       const decode_proms = [];
       for (const k in ret.snapshots) {

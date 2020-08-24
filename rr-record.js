@@ -1,4 +1,5 @@
 LogCanvas = (() => {
+   const RECORDING_VERSION = 1;
    const AUTO_RECORD_FRAMES = 60 * 60;
    const SKIP_EMPTY_FRAMES = true;
    const SNAPSHOT_LINE_WRAP = 100;
@@ -203,6 +204,7 @@ LogCanvas = (() => {
          const parts = [];
          parts.push(
             '{', // begin root object
+            `\n"version": ${RECORDING_VERSION},`
             `\n"elem_info_by_key": ${elem_info_json},`,
             '\n"frames": [', // begin frames
             '\n   ['         // begin frame
