@@ -7,6 +7,14 @@ LogCanvas = (() => {
 
    // -
 
+   // MS Fishbowl overrides window.performance with its own custom
+   // object for some reason, so save this before Fishbowl has a chance
+   // to mess with it.
+   const perf = window.performance;
+   function performance_now() {
+      return perf.now();
+   }
+
    class SplitLogger {
       prefix = ''
 
@@ -14,12 +22,12 @@ LogCanvas = (() => {
          if (desc) {
             this.prefix = desc + ' ';
          }
-         this.start = performance.now();
+         this.start = performance_now();
          this.last_split = this.start;
       }
 
       log(text) {
-         let now = performance.now();
+         let now = performance_now();
          const split_diff = now - this.last_split;
          const total_diff = now - this.start;
          console.log(`[${this.prefix}${split_diff|0}/${total_diff|0}ms]`, text);
@@ -124,6 +132,7 @@ LogCanvas = (() => {
             return to_data_url(obj, w, h);
          }
          if (type.startsWith('WebGL')) return undefined;
+         if (type == 'CanvasRenderingContext2D') return undefined;
 
          console.error(`[LogCanvas@${window.origin}] Warning: Unrecognized type "${type}" in snapshot_str.`, obj);
          return undefined;
@@ -204,7 +213,7 @@ LogCanvas = (() => {
          const parts = [];
          parts.push(
             '{', // begin root object
-            `\n"version": ${RECORDING_VERSION},`
+            `\n"version": ${RECORDING_VERSION},`,
             `\n"elem_info_by_key": ${elem_info_json},`,
             '\n"frames": [', // begin frames
             '\n   ['         // begin frame
