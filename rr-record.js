@@ -1,5 +1,5 @@
 LogCanvas = (() => {
-   const RECORDING_VERSION = 1;
+   const RECORDING_VERSION = 2;
    const AUTO_RECORD_FRAMES = 60 * 60;
    const SKIP_EMPTY_FRAMES = true;
    const SNAPSHOT_LINE_WRAP = 100;
@@ -110,18 +110,33 @@ LogCanvas = (() => {
          return this.last_id += 1;
       }
 
-      snapshot_str(obj, w, h) {
+      snapshot_str(obj, ignore_data, w, h) {
          const type = obj.constructor.name;
 
+         if (type == 'Object') {
+            const ret = type + ':' + JSON.stringify(obj);
+            return ret;
+         }
+
          if (obj instanceof ArrayBuffer) {
+            if (ignore_data) {
+               return type + ':*' + obj.length;
+            }
             const arr = new Uint8Array(obj);
             return type + ':' + arr.toString();
          }
          if (obj instanceof DataView) {
+            if (ignore_data) {
+               return type + ':*' + obj.length;
+            }
             const arr = new Uint8Array(obj.buffer);
             return type + ':' + arr.toString();
          }
          if (obj.buffer instanceof ArrayBuffer) {
+            if (ignore_data) {
+               const ret = type + ':*' + obj.length;
+               return ret;
+            }
             return type + ':' + obj.toString();
          }
 
@@ -155,12 +170,12 @@ LogCanvas = (() => {
          return key;
       }
 
-      pickle_obj(obj, w, h) {
+      pickle_obj(obj, ignore_data, w, h) {
          if (!obj) return null;
 
          if (obj._lc_key) return obj._lc_key;
 
-         const val_str = this.snapshot_str(obj, w, h);
+         const val_str = this.snapshot_str(obj, ignore_data, w, h);
          if (val_str) {
             // Snapshot instead of object key.
             const prev_key = obj._lc_snapshot_key;
@@ -178,17 +193,18 @@ LogCanvas = (() => {
          return this.obj_key(obj);
       }
 
-      pickle_arg(arg) {
+      pickle_arg(arg, ignore_data) {
          if (typeof arg == 'string') return '"' + arg;
          if (!arg) return arg;
-         if (arg instanceof Array) return arg.map(x => this.pickle_arg(x));
-         if (typeof arg == 'object') return this.pickle_obj(arg);
+         if (arg instanceof Array) return arg.map(x => this.pickle_arg(x, ignore_data));
+         if (typeof arg == 'object') return this.pickle_obj(arg, ignore_data);
          return arg;
       }
 
       pickle_call(obj, func_name, call_args, call_ret) {
          const obj_key = this.obj_key(obj);
-         const args = [].map.call(call_args, x => this.pickle_arg(x));
+         const ignore_data = (func_name == 'readPixels');
+         const args = [].map.call(call_args, x => this.pickle_arg(x, ignore_data));
          const ret = this.pickle_arg(call_ret);
          this.new_call(obj_key, func_name, args, ret);
       }

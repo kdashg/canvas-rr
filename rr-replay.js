@@ -1,6 +1,12 @@
 'use strict';
 
-const RECORDING_VERSION = 1;
+const RECORDING_VERSION = 2;
+
+function split_once(str, delim) {
+   const [left] = str.split(delim, 1);
+   const right = str.slice(left.length + delim.length);
+   return [left, right];
+}
 
 class Recording {
    // String prefixes:
@@ -35,8 +41,16 @@ class Recording {
                   return elem;
                }
 
-               let [type, data] = str.split(':');
-               data = JSON.parse('[' + data + ']');
+               let [type, data] = split_once(str, ':');
+               if (type == 'Object') {
+                  return JSON.parse(data);
+               }
+
+               if (data[0] == '*') {
+                  data = parseInt(data.slice(1));
+               } else {
+                  data = JSON.parse('[' + data + ']');
+               }
 
                if (type === 'ArrayBuffer') {
                   const typed = new Uint8Array(data);
