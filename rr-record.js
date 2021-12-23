@@ -1,9 +1,11 @@
 LogCanvas = (() => {
-   const RECORDING_VERSION = 2;
-   const AUTO_RECORD_FRAMES = 60 * 60;
+   const RECORDING_VERSION = 3;
+   const AUTO_RECORD_FRAMES = 3 * 60;
    const SKIP_EMPTY_FRAMES = true;
    const SNAPSHOT_LINE_WRAP = 100;
    const MAX_SNAPSHOT_SIZE = 16384;
+   const SNAPSHOT_INLINE_LEN = 100;
+   const READABLE_SNAPSHOTS = false;
 
    // -
 
@@ -81,6 +83,59 @@ LogCanvas = (() => {
 
    // -
 
+   const Base64 = {
+      encode: dec_ab => {
+         const dec_u8a = new Uint8Array(dec_ab);
+         const dec_bstr = String.fromCodePoint(...dec_u8a);
+         const enc = btoa(dec_bstr);
+         return enc;
+      },
+      decode: enc => {
+         const dec_bstr = atob(enc);
+         const dec_u8a = new Uint8Array([].map.call(dec_bstr, x => x.codePointAt(0)));
+         return dec_u8a.buffer;
+      },
+   };
+
+   function to_data_snapshot(obj, ignore_data) {
+      const type = obj.constructor.name;
+      if (type == 'Object') {
+         const ret = type + ':' + JSON.stringify(obj);
+         return ret;
+      }
+
+      let ab;
+      let view;
+      if (obj instanceof ArrayBuffer) {
+         ab = obj;
+         view = new Uint8Array(obj);
+      }
+      if (obj.buffer instanceof ArrayBuffer) {
+         ab = obj.buffer;
+         view = obj;
+         if (obj instanceof DataView) {
+            view = new Uint8Array(obj.buffer);
+         }
+      }
+
+      if (ab) {
+         if (ignore_data) {
+            return type + ':*' + view.length;
+         }
+         let str;
+         if (READABLE_SNAPSHOTS) {
+            str = view.toString();
+         } else {
+            str = '^' + Base64.encode(ab);
+         }
+         return type + ':' + str;
+      }
+
+      return undefined;
+   }
+
+   // -
+
    class Recording {
       // String prefixes:
       // @: snapshot key
@@ -112,34 +167,6 @@ LogCanvas = (() => {
 
       snapshot_str(obj, ignore_data, w, h) {
          const type = obj.constructor.name;
-
-         if (type == 'Object') {
-            const ret = type + ':' + JSON.stringify(obj);
-            return ret;
-         }
-
-         if (obj instanceof ArrayBuffer) {
-            if (ignore_data) {
-               return type + ':*' + obj.length;
-            }
-            const arr = new Uint8Array(obj);
-            return type + ':' + arr.toString();
-         }
-         if (obj instanceof DataView) {
-            if (ignore_data) {
-               return type + ':*' + obj.length;
-            }
-            const arr = new Uint8Array(obj.buffer);
-            return type + ':' + arr.toString();
-         }
-         if (obj.buffer instanceof ArrayBuffer) {
-            if (ignore_data) {
-               const ret = type + ':*' + obj.length;
-               return ret;
-            }
-            return type + ':' + obj.toString();
-         }
-
          switch (type) {
          case 'HTMLCanvasElement':
          case 'HTMLImageElement':
@@ -148,6 +175,9 @@ LogCanvas = (() => {
          }
          if (type.startsWith('WebGL')) return undefined;
          if (type == 'CanvasRenderingContext2D') return undefined;
+
+         let ret = to_data_snapshot(obj, ignore_data);
+         if (ret !== undefined) return ret;
 
          console.error(`[LogCanvas@${window.origin}] Warning: Unrecognized type "${type}" in snapshot_str.`, obj);
          return undefined;
@@ -177,6 +207,9 @@ LogCanvas = (() => {
 
          const val_str = this.snapshot_str(obj, ignore_data, w, h);
          if (val_str) {
+            if (!val_str.startsWith('data:') && val_str.length <= SNAPSHOT_INLINE_LEN) {
+               return '=' + val_str;
+            }
             // Snapshot instead of object key.
             const prev_key = obj._lc_snapshot_key;
             if (prev_key) {
@@ -193,7 +226,10 @@ LogCanvas = (() => {
          return this.obj_key(obj);
       }
 
-      pickle_arg(arg, ignore_data) {
+      pickle_arg(arg, ignore_data, spew) {
+         if (spew) {
+            console.log('pickle_arg', {arg});
+         }
          if (typeof arg == 'string') return '"' + arg;
          if (!arg) return arg;
          if (arg instanceof Array) return arg.map(x => this.pickle_arg(x, ignore_data));
@@ -204,7 +240,8 @@ LogCanvas = (() => {
       pickle_call(obj, func_name, call_args, call_ret) {
          const obj_key = this.obj_key(obj);
          const ignore_data = (func_name == 'readPixels');
-         const args = [].map.call(call_args, x => this.pickle_arg(x, ignore_data));
+         const spew = false;//(func_name == 'uniform3fv');
+         const args = [].map.call(call_args, x => this.pickle_arg(x, ignore_data, spew));
          const ret = this.pickle_arg(call_ret);
          this.new_call(obj_key, func_name, args, ret);
       }
@@ -421,19 +458,21 @@ LogCanvas = (() => {
       RECORDING = new Recording();
 
       function per_frame() {
-         const cur_frame = RECORDING.frames[RECORDING.frames.length-1];
-         if (SKIP_EMPTY_FRAMES && cur_frame && !cur_frame.length) {
-            requestAnimationFrame(per_frame);
-            return;
+         if (RECORDING_FRAMES) {
+            const cur_frame = RECORDING.frames[RECORDING.frames.length-1];
+            if (SKIP_EMPTY_FRAMES && cur_frame && !cur_frame.length) {
+               requestAnimationFrame(per_frame);
+               return;
+            }
+            RECORDING_FRAMES -= 1;
+            RECORDING_FRAMES |= 0;
          }
-         RECORDING_FRAMES -= 1;
-         RECORDING_FRAMES |= 0;
          if (!RECORDING_FRAMES) {
             let calls = 0;
             RECORDING.frames.forEach(frame_calls => {
                calls += frame_calls.length;
             });
-            console.log(`[LogCanvas@${window.origin}] ${n} frames recorded! (${calls} calls)`);
+            console.log(`[LogCanvas@${window.origin}] ${RECORDING.frames.length}/${n} frames recorded! (${calls} calls)`);
             return;
          }
          RECORDING.new_frame();
@@ -456,11 +495,17 @@ LogCanvas = (() => {
       dry_run && slog.log(`done`);
    }
 
+   function stop() {
+      RECORDING_FRAMES = 0;
+      console.log(`[LogCanvas@${window.origin}] Stopping...`);
+   }
+
    return {
       inject_observer: inject_observer,
       record_frames: record_frames,
       record_next_frames: record_next_frames,
       download: download,
+      stop: stop,
    };
 })();
 

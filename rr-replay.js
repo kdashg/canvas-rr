@@ -1,11 +1,53 @@
 'use strict';
 
-const RECORDING_VERSION = 2;
+const RECORDING_VERSION = 3;
 
 function split_once(str, delim) {
    const [left] = str.split(delim, 1);
    const right = str.slice(left.length + delim.length);
    return [left, right];
+}
+
+const Base64 = {
+   encode: dec_ab => {
+      const dec_u8a = new Uint8Array(dec_ab);
+      const dec_bstr = String.fromCodePoint(...dec_u8a);
+      const enc = btoa(dec_bstr);
+      return enc;
+   },
+   decode: enc => {
+      const dec_bstr = atob(enc);
+      const dec_u8a = new Uint8Array([].map.call(dec_bstr, x => x.codePointAt(0)));
+      return dec_u8a.buffer;
+   },
+};
+
+function from_data_snapshot(str) {
+   let [type, data] = split_once(str, ':');
+   if (type == 'Object') {
+      return JSON.parse(data);
+   }
+
+   if (data[0] == '*') {
+      data = parseInt(data.slice(1));
+   } else if (data[0] == '^') {
+      data = Base64.decode(data.slice(1));
+   } else {
+      data = JSON.parse('[' + data + ']');
+   }
+
+   if (type === 'ArrayBuffer') {
+      const typed = new Uint8Array(data);
+      return typed.buffer;
+   }
+   if (type === 'DataView') {
+      const typed = new Uint8Array(data);
+      return new DataView(typed.buffer);
+   }
+
+   // Assume e.g. Uint8Array
+   const ctor = window[type];
+   return new ctor(data);
 }
 
 class Recording {
@@ -41,28 +83,7 @@ class Recording {
                   return elem;
                }
 
-               let [type, data] = split_once(str, ':');
-               if (type == 'Object') {
-                  return JSON.parse(data);
-               }
-
-               if (data[0] == '*') {
-                  data = parseInt(data.slice(1));
-               } else {
-                  data = JSON.parse('[' + data + ']');
-               }
-
-               if (type === 'ArrayBuffer') {
-                  const typed = new Uint8Array(data);
-                  return typed.buffer;
-               }
-               if (type === 'DataView') {
-                  const typed = new Uint8Array(data);
-                  return new DataView(typed.buffer);
-               }
-
-               const ctor = window[type];
-               return new ctor(data);
+               return from_data_snapshot(str);
             })();
             ret.snapshots[k] = obj;
          })() );
@@ -153,6 +174,7 @@ class Recording {
          if (typeof x != 'string') return x;
          const initial = x[0];
          if (initial == '"') return x.substring(1);
+         if (initial == '=') return from_data_snapshot(x.substring(1));
          if (initial == '@') {
             const ret = this.snapshots[x];
             if (!ret) new Error("Missing snapshot: " + x);
