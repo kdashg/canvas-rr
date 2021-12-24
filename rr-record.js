@@ -1,5 +1,5 @@
 LogCanvas = (() => {
-   const RECORDING_VERSION = 3;
+   const RECORDING_VERSION = 4;
    const AUTO_RECORD_FRAMES = 3 * 60;
    const SKIP_EMPTY_FRAMES = true;
    const SNAPSHOT_LINE_WRAP = 100;
@@ -98,45 +98,38 @@ LogCanvas = (() => {
       },
    };
 
-   function to_data_snapshot(obj, ignore_data) {
+   function snapshot_if_array_buffer(obj, length_only) {
       const type = obj.constructor.name;
-      if (type == 'Object') {
-         const ret = type + ':' + JSON.stringify(obj);
-         return [ret];
-      }
 
-      let ab;
       let view;
       if (obj instanceof ArrayBuffer) {
-         ab = obj;
          view = new Uint8Array(obj);
-      }
-      if (obj.buffer instanceof ArrayBuffer) {
-         ab = obj.buffer;
+      } else if (obj instanceof DataView) {
+         view = new Uint8Array(obj, obj.byteOffset, obj.byteLength);
+      } else if (obj.buffer instanceof ArrayBuffer) {
          view = obj;
-         if (obj instanceof DataView) {
-            view = new Uint8Array(obj.buffer);
-         }
+      } else {
+         return undefined;
       }
 
-      if (ab) {
-         if (ignore_data) {
-            return [type + ':*' + view.length];
-         }
-         let str;
-         if (READABLE_SNAPSHOTS) {
-            str = view.toString();
-         } else {
-            str = '^' + Base64.encode(ab);
-         }
-         let hash;
-         if (DEDUPE_SNAPSHOTS) {
-            hash = fnv1a_32_hex(ab);
-         }
-         return [type + ':' + str, hash];
+      if (length_only) {
+         return [type + ':*' + view.length];
       }
-
-      return undefined;
+      let str;
+      if (READABLE_SNAPSHOTS) {
+         str = view.toString();
+      } else {
+         str = '^' + Base64.encode(view.buffer);
+      }
+      let hash;
+      if (DEDUPE_SNAPSHOTS) {
+         // We must hash the type in too!
+         // I don't think it's worth it to de-dupe data across types.
+         hash = fnv1a_32(type);
+         hash = fnv1a_32(view, hash);
+         hash = '0x' + hash.toString(16);
+      }
+      return [type + ':' + str, hash];
    }
 
    // -
@@ -152,21 +145,25 @@ LogCanvas = (() => {
    // FNV-1a: A solid and simple non-cryptographic hash.
    // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
    // (Would be simpler if doing full-precision u32*u32 were easier in JS...)
-   function fnv1a_32(str) {
-      let bytes = str;
+   function fnv1a_32(input, continue_from) {
+      let bytes = input;
       if (typeof bytes == 'string') {
          bytes = new Uint8Array([].map.call(bytes, x => x.codePointAt(0)));
+      } else if (bytes.buffer instanceof ArrayBuffer) {
+         bytes = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      } else if (bytes instanceof ArrayBuffer) {
+         bytes = new Uint8Array(bytes.buffer);
+      } else {
+         throw input.constructor.name;
       }
-      if (bytes.buffer instanceof ArrayBuffer) {
-         bytes = bytes.buffer;
-      }
-      if (bytes.constructor != ArrayBuffer) throw str.constructor.name;
 
       const PRIME = 0x01000193;
       const OFFSET_BASIS = 0x811c9dc5;
 
-      let hash = OFFSET_BASIS;
-      bytes = new Uint8Array(bytes);
+      if (continue_from === undefined) {
+         continue_from = OFFSET_BASIS;
+      }
+      let hash = continue_from;
       bytes.forEach(c => {
          // i32*i32->i32 has the same bit-result as u32*u32->u32.
          hash = mul_i32(PRIME, hash ^ c);
@@ -175,15 +172,6 @@ LogCanvas = (() => {
       const u32 = new Uint32Array(1);
       u32[0] = hash;
       return u32[0];
-   }
-
-   function fnv1a_32_hex(input) {
-      const h = fnv1a_32(input);
-      let hs = h.toString(16);
-      while (hs.length < 8) {
-         hs = '0' + hs;
-      }
-      return '0x' + hs;
    }
 
    // -
@@ -217,21 +205,29 @@ LogCanvas = (() => {
          return this.last_id += 1;
       }
 
-      snapshot_str(obj, ignore_data, w, h) {
+      // -
+
+      snapshot_str(obj, func_name, arg_id) {
          const type = obj.constructor.name;
          switch (type) {
          case 'HTMLCanvasElement':
          case 'HTMLImageElement':
          case 'HTMLVideoElement':
-            return [to_data_url(obj, w, h)];
+            return [to_data_url(obj)];
          }
          if (type.startsWith('WebGL')) return undefined;
          if (type == 'CanvasRenderingContext2D') return undefined;
 
-         const ret = to_data_snapshot(obj, ignore_data);
-         if (ret !== undefined) return ret;
+         if (type == 'Object') {
+            const str = JSON.stringify(obj);
+            return [type + ':' + str];
+         }
 
-         console.error(`[LogCanvas@${window.origin}] Warning: Unrecognized type "${type}" in snapshot_str.`, obj);
+         const length_only = (func_name == 'readPixels');
+         const snapshot = snapshot_if_array_buffer(obj, length_only);
+         if (snapshot !== undefined) return snapshot;
+
+         console.error(`[LogCanvas@${window.origin}] Warning: Unrecognized type "${type}" in snapshot_str for ${func_name}.${arg_id}: `, obj);
          return undefined;
       }
 
@@ -252,18 +248,30 @@ LogCanvas = (() => {
          return key;
       }
 
-      pickle_obj(obj, ignore_data, w, h) {
+      pickle_obj(obj, func_name, arg_id) {
          if (!obj) return null;
 
          if (obj._lc_key) return obj._lc_key;
 
-         const snapshot = this.snapshot_str(obj, ignore_data, w, h);
+         if (arg_id == -1) {
+            // Return values can be ignored.
+            const ctor = obj.constructor;
+            if (ctor == ImageData || ctor == TextMetrics) {
+               return '#' + ctor.name;
+            }
+         }
+
+         let snapshot;
+         if (arg_id != -1) {
+            // Don't snapshot return values.
+            snapshot = this.snapshot_str(obj, func_name, arg_id);
+         }
          if (snapshot) {
+            // Snapshot instead of just tagging with object key.
             const [val_str, hash] = snapshot;
             if (!val_str.startsWith('data:') && val_str.length <= SNAPSHOT_INLINE_LEN) {
                return '=' + val_str;
             }
-            // Snapshot instead of object key.
             const prev_key = obj._lc_snapshot_key;
             if (prev_key) {
                // Has previous snapshot, but data might have changed.
@@ -295,23 +303,21 @@ LogCanvas = (() => {
          return this.obj_key(obj);
       }
 
-      pickle_arg(arg, ignore_data, spew) {
+      pickle_arg(arg, func_name, i, spew) {
          if (spew) {
             console.log('pickle_arg', {arg});
          }
          if (typeof arg == 'string') return '"' + arg;
          if (!arg) return arg;
-         if (arg instanceof Array) return arg.map(x => this.pickle_arg(x, ignore_data));
-         if (typeof arg == 'object') return this.pickle_obj(arg, ignore_data);
+         if (arg instanceof Array) return arg.map(x => this.pickle_arg(x, func_name, i));
+         if (typeof arg == 'object') return this.pickle_obj(arg, func_name, i);
          return arg;
       }
 
       pickle_call(obj, func_name, call_args, call_ret) {
          const obj_key = this.obj_key(obj);
-         const ignore_data = (func_name == 'readPixels');
-         const spew = false;//(func_name == 'uniform3fv');
-         const args = [].map.call(call_args, x => this.pickle_arg(x, ignore_data, spew));
-         const ret = this.pickle_arg(call_ret);
+         const args = [].map.call(call_args, (x,i) => this.pickle_arg(x, func_name, i));
+         const ret = this.pickle_arg(call_ret, func_name, -1);
          this.new_call(obj_key, func_name, args, ret);
       }
 

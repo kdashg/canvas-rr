@@ -1,6 +1,9 @@
 'use strict';
 
-const RECORDING_VERSION = 3;
+const RECORDING_VERSION = 4;
+let SPEW_ON_GL_ERROR;
+//SPEW_ON_GL_ERROR = true;
+//SPEW_ON_GL_ERROR = ['bufferSubData'];
 
 function split_once(str, delim) {
    const [left] = str.split(delim, 1);
@@ -145,8 +148,6 @@ class Recording {
          this.play_calls(element_map, frame_id, call_id);
          call_id = 0;
       }
-      if (frame_id >= this.frames.length) return;
-      this.play_calls(element_map, frame_id, call_id, end[1]);
    }
 
    play_calls(element_map, frame_id, call_begin, call_end) {
@@ -213,19 +214,48 @@ class Recording {
          console.log("Warning: Missing func: " + obj.constructor.name + '.' + func_name);
          return;
       }
-      if (window._CRR_REPLAY_SPEW) {
-         let pre = '';
-         if (ret) {
-            pre = `${ret} = `;
+
+      // -
+
+      function enum_from_val(v, obj) {
+         obj = obj || WebGL2RenderingContext;
+         for (const [k,cur_v] of Object.entries(WebGLRenderingContext)) {
+            if (v == cur_v) {
+               return k;
+            }
          }
-         console.log(`${pre}${obj}.${func_name}(`, ...call_args, `)`);
+         return `0x${v.toString(16)}`;
       }
+
+      function check_error(when_str) {
+         if (!SPEW_ON_GL_ERROR) return;
+         if (!obj.getError) return;
+         if (SPEW_ON_GL_ERROR.includes && !SPEW_ON_GL_ERROR.includes(func_name)) {
+            return;
+         }
+         const err = obj.getError();
+         if (!err) return;
+
+         const str = enum_from_val(err);
+         console.log(`[SPEW_ON_GL_ERROR] getError() -> ${str}`);
+         console.error(`[SPEW_ON_GL_ERROR] ...${when_str} `,
+            {frame_id, call_id, ret, obj, func_name, call_args});
+      }
+
+      if (window._CRR_REPLAY_SPEW) {
+         console.log(`${ret || '()'} = ${obj}.${func_name}(`, ...call_args, `)`);
+      }
+      check_error('before');
+
       const call_ret = func.apply(obj, call_args);
       if (ret && typeof ret == 'string') {
          if (ret[0] == '$') {
             element_map[ret] = call_ret;
          }
       }
+
+      check_error('after');
+
       return call_ret;
    }
 }
