@@ -6,6 +6,7 @@ LogCanvas = (() => {
    const MAX_SNAPSHOT_SIZE = 16384;
    const SNAPSHOT_INLINE_LEN = 100;
    const READABLE_SNAPSHOTS = false;
+   const DEDUPE_SNAPSHOTS = true;
 
    // -
 
@@ -101,7 +102,7 @@ LogCanvas = (() => {
       const type = obj.constructor.name;
       if (type == 'Object') {
          const ret = type + ':' + JSON.stringify(obj);
-         return ret;
+         return [ret];
       }
 
       let ab;
@@ -120,7 +121,7 @@ LogCanvas = (() => {
 
       if (ab) {
          if (ignore_data) {
-            return type + ':*' + view.length;
+            return [type + ':*' + view.length];
          }
          let str;
          if (READABLE_SNAPSHOTS) {
@@ -128,10 +129,61 @@ LogCanvas = (() => {
          } else {
             str = '^' + Base64.encode(ab);
          }
-         return type + ':' + str;
+         let hash;
+         if (DEDUPE_SNAPSHOTS) {
+            hash = fnv1a_32_hex(ab);
+         }
+         return [type + ':' + str, hash];
       }
 
       return undefined;
+   }
+
+   // -
+
+   // Because Everything Is Doubles, we only have 53bit integer precision,
+   // so i32*i32 is imprecise (i.e. wrong) for larger numbers.
+   function mul_i32(a, b) {
+      const ah = (a >> 16) & 0xffff;
+      const al = a & 0xffff;
+      return ((ah*b << 16) + (al*b|0)) | 0;
+   }
+
+   // FNV-1a: A solid and simple non-cryptographic hash.
+   // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
+   // (Would be simpler if doing full-precision u32*u32 were easier in JS...)
+   function fnv1a_32(str) {
+      let bytes = str;
+      if (typeof bytes == 'string') {
+         bytes = new Uint8Array([].map.call(bytes, x => x.codePointAt(0)));
+      }
+      if (bytes.buffer instanceof ArrayBuffer) {
+         bytes = bytes.buffer;
+      }
+      if (bytes.constructor != ArrayBuffer) throw str.constructor.name;
+
+      const PRIME = 0x01000193;
+      const OFFSET_BASIS = 0x811c9dc5;
+
+      let hash = OFFSET_BASIS;
+      bytes = new Uint8Array(bytes);
+      bytes.forEach(c => {
+         // i32*i32->i32 has the same bit-result as u32*u32->u32.
+         hash = mul_i32(PRIME, hash ^ c);
+      });
+
+      const u32 = new Uint32Array(1);
+      u32[0] = hash;
+      return u32[0];
+   }
+
+   function fnv1a_32_hex(input) {
+      const h = fnv1a_32(input);
+      let hs = h.toString(16);
+      while (hs.length < 8) {
+         hs = '0' + hs;
+      }
+      return '0x' + hs;
    }
 
    // -
@@ -171,12 +223,12 @@ LogCanvas = (() => {
          case 'HTMLCanvasElement':
          case 'HTMLImageElement':
          case 'HTMLVideoElement':
-            return to_data_url(obj, w, h);
+            return [to_data_url(obj, w, h)];
          }
          if (type.startsWith('WebGL')) return undefined;
          if (type == 'CanvasRenderingContext2D') return undefined;
 
-         let ret = to_data_snapshot(obj, ignore_data);
+         const ret = to_data_snapshot(obj, ignore_data);
          if (ret !== undefined) return ret;
 
          console.error(`[LogCanvas@${window.origin}] Warning: Unrecognized type "${type}" in snapshot_str.`, obj);
@@ -205,8 +257,9 @@ LogCanvas = (() => {
 
          if (obj._lc_key) return obj._lc_key;
 
-         const val_str = this.snapshot_str(obj, ignore_data, w, h);
-         if (val_str) {
+         const snapshot = this.snapshot_str(obj, ignore_data, w, h);
+         if (snapshot) {
+            const [val_str, hash] = snapshot;
             if (!val_str.startsWith('data:') && val_str.length <= SNAPSHOT_INLINE_LEN) {
                return '=' + val_str;
             }
@@ -217,8 +270,24 @@ LogCanvas = (() => {
                const prev_val_str = this.snapshots[prev_key];
                if (val_str == prev_val_str) return prev_key;
             }
+            let uuid = hash;
+            if (!uuid) {
+               uuid = this.new_id();
+            }
+            const root_key = '@' + uuid;
+            let collision_id = 0;
+            let key = root_key;
+            while (this.snapshots[key]) {
+               //console.log(`Deduping ${key} (${val_str.length} chars)`);
+               if (this.snapshots[key] == val_str) break;
+               collision_id += 1;
+               key = root_key + '.' + collision_id;
+            }
+            if (collision_id) {
+               console.warning(`Collision while de-duping snapshot -> ${key}`);
+            }
 
-            const key = obj._lc_snapshot_key = '@' + this.new_id();
+            obj._lc_snapshot_key = key;
             this.snapshots[key] = val_str;
             return key;
          }
@@ -343,7 +412,12 @@ LogCanvas = (() => {
             const was = desc.set;
             desc.set = function(v) {
                was.call(this, v);
-               fn_observe(this, 'set ' + k, [v], undefined);
+               try {
+                  fn_observe(this, 'set ' + k, [v], undefined);
+               } catch (e) {
+                  console.error(e);
+                  throw e;
+               }
             };
             continue;
          }
@@ -352,7 +426,12 @@ LogCanvas = (() => {
             const was = desc.value;
             desc.value = function() {
                const ret = was.apply(this, arguments);
-               fn_observe(this, k, arguments, ret);
+               try {
+                  fn_observe(this, k, arguments, ret);
+               } catch (e) {
+                  console.error(e);
+                  throw e;
+               }
                return ret;
             };
             continue;
