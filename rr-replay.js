@@ -311,8 +311,7 @@ class Recording {
       const reheat_call = call._reheat_call || invoke(() => { // Bake
          if (func_name.startsWith('set ')) {
             const setter_name = func_name.substring(4);
-            return (element_map) => { // Reheat `set `
-               const obj = reheat_obj(element_map);
+            return (element_map, obj) => { // Reheat `set `
                const call_args = reheat_call_args(element_map);
 
                obj[setter_name] = call_args[0];
@@ -325,8 +324,7 @@ class Recording {
          if (func_name.startsWith('new ')) {
             const class_name = func_name.substring(4);
             const func = window[class_name];
-            return (element_map) => { // Reheat `new `
-               const obj = reheat_obj(element_map);
+            return (element_map, obj) => { // Reheat `new `
                const call_args = reheat_call_args(element_map);
 
                if (window._CRR_REPLAY_SPEW) {
