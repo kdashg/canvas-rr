@@ -1,11 +1,16 @@
 'use strict';
 
 const RECORDING_VERSION = 4;
-let SPEW_ON_GL_ERROR;
 const BAKE_AND_REHEAT_CALLS = false;
 const BAKE_ASSUME_OBJ_FUNC_LOOKUP_IMMUTABLE = true;
+const DEDUPE_STRINGS = true;
+const DEDUPE_CALLS = true;
+
+let SPEW_ON_GL_ERROR;
 //SPEW_ON_GL_ERROR = true;
 //SPEW_ON_GL_ERROR = ['bufferSubData'];
+
+// -
 
 function split_once(str, delim) {
    const [left] = str.split(delim, 1);
@@ -61,6 +66,27 @@ function from_data_snapshot(str) {
    return new ctor(data);
 }
 
+function suffix_scaled(val) {
+   const SUFFIX_LIST = ['n', 'u', 'm', '', 'K', 'M', 'G', 'T'];
+   const UNSCALED_SUFFIX = SUFFIX_LIST.indexOf('');
+   let tier = Math.floor((Math.log10(val) / 3));
+   tier += UNSCALED_SUFFIX;
+   tier = Math.max(0, Math.min(tier, SUFFIX_LIST.length-1));
+   tier -= UNSCALED_SUFFIX;
+   const tier_base = Math.pow(1000, tier);
+   return [val / tier_base, SUFFIX_LIST[tier + UNSCALED_SUFFIX]];
+}
+
+function to_suffixed(val, fixed) {
+   const [scaled, suffix] = suffix_scaled(val);
+   if (!suffix) return val;
+
+   if (fixed === undefined) {
+      fixed = 2 - (Math.log10(scaled) | 0);
+   }
+   return `${scaled.toFixed(fixed)}${suffix}`;
+}
+
 class Recording {
    // String prefixes:
    // @: snapshot key
@@ -100,6 +126,64 @@ class Recording {
          })() );
       }
       await Promise.all(decode_proms);
+
+      if (DEDUPE_STRINGS) {
+         // Previously, in about:memory for an 800MB Aquarium recording:
+         // > 124.27 MB (02.64%) - string(length=9, copies=5429600, "uniform1f")/gc-heap/latin1
+         // > 123.57 MB (02.63%) - string(length=10, copies=5398791, "uniform3fv")/gc-heap/latin1
+         // >  62.12 MB (01.32%) - string(length=12, copies=2714163, "drawElements")/gc-heap/latin1
+         // >  61.15 MB (01.30%) - string(length=4, copies=2671851, "$431")/gc-heap/latin1
+         // >  61.15 MB (01.30%) - string(length=4, copies=2671851, "$433")/gc-heap/latin1
+         // >  61.15 MB (01.30%) - string(length=4, copies=2671851, "$435")/gc-heap/latin1
+         // >  61.15 MB (01.30%) - string(length=4, copies=2671851, "$437")/gc-heap/latin1
+         // 124MB / 5.4M is just under(?) 23 bytes, we just have a ton
+         // of them.
+         // I'm sure the data locality is just great, too!
+         const dedupe_map = {};
+         let before_count = 0;
+         function dedupe(val) {
+            if (typeof val == 'string') {
+               before_count += 1;
+               return dedupe_map[val] || (dedupe_map[val] = val);
+            }
+            return val;
+         }
+         for (const frame of ret.frames) {
+            for (const call of frame) {
+               //const [elem_key, func_name, args, ret] = call;
+               call[0] = dedupe(call[0]);
+               call[1] = dedupe(call[1]);
+               const args = call[2];
+               for (const i in args) {
+                  args[i] = dedupe(args[i]);
+               }
+               call[3] = dedupe(call[3]);
+            }
+         }
+         const after_count = Object.keys(dedupe_map).length;
+         console.log(`Deduped ${to_suffixed(before_count)} strings`,
+                     `down to ${to_suffixed(after_count)}.`);
+      }
+
+      if (DEDUPE_CALLS) {
+         let before_count = 0;
+         const dedupe_map = {};
+         // We probably want to prune the map of one-offs, so that we
+         // don't need to store every call in the map. (oom hazard)
+         // But for recordings >1000 frames, it would be ideal to dedupe
+         // once-per-frame calls.
+         for (const frame of ret.frames) {
+            for (const call_i in frame) {
+               before_count += 1;
+               const call = frame[call_i];
+               const json = JSON.stringify(call);
+               frame[call_i] = dedupe_map[json] || (dedupe_map[json] = call);
+            }
+         }
+         const after_count = Object.keys(dedupe_map).length;
+         console.log(`Deduped ${to_suffixed(before_count)} calls`,
+                     `down to ${to_suffixed(after_count)}.`);
+      }
 
       return ret;
    }

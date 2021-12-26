@@ -46,7 +46,7 @@ async function file_input_changed(blob) {
 
    e_status.textContent = 'Reading...';
    let text = await blob.text();
-   slog.log(`Read ${text.length} bytes.`);
+   slog.log(`Read ${to_suffixed(text.length)} bytes.`);
 
    e_status.textContent = 'Parsing...';
    text = text.replace(/\n *\/\/.*/g, '\n'); // Strip non-spec json comments
