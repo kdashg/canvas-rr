@@ -168,32 +168,29 @@ class Recording {
       }
    }
 
-   play_call(_element_map, frame_id, call_id) {
+   play_call(element_map_mut, frame_id, call_id) {
       const call = this.frames[frame_id][call_id];
       const [elem_key, func_name, args, ret] = call;
       //console.log(call);
 
       // `call` is fixed. as is `this.snapshots`.
       // `element_map` is mutable though!
+      // Mutable vars are suffixed with _mut, and should not be used
+      // during baking, because they might be different at reheat time.
+
       // Replaying of baked calls must be based on the *this*
       // play_call's `element_map`, not whatever was in `element_map`
       // when it was baked!
 
-      // `call._is_baked || invoke(...` maens that we won't bother to
+      let obj_mut = window;
+      if (elem_key) {
+         obj_mut = element_map_mut[elem_key];
+         if (!obj_mut) throw new Error("Missing elem_key: " + elem_key);
+      }
+
+      // `call._is_baked || invoke(...` means that we won't bother to
       // even define these functions when we know they're closure'd into
       // the baked call.
-      const reheat_obj = call._is_baked || invoke(() => { // Bake
-         // Probably not worth baking out this branch.
-         return (element_map) => { // Reheat
-            let obj = window;
-            if (elem_key) {
-               obj = element_map[elem_key];
-               if (!obj) throw new Error("Missing elem_key: " + elem_key);
-            }
-            return obj;
-         };
-      });
-
       const reheat_call_args = call._is_baked || invoke(() => { // Bake first
          const fix_ups = [];
          const baked_call_args = args.map((x,i) => {
@@ -272,6 +269,7 @@ class Recording {
          }
 
          function check_error(when_str, obj, call_args) {
+            if (!SPEW_ON_GL_ERROR) return;
             if (!obj.getError) return;
             if (SPEW_ON_GL_ERROR.includes && !SPEW_ON_GL_ERROR.includes(func_name)) {
                return;
@@ -285,25 +283,24 @@ class Recording {
                {frame_id, call_id, ret, obj, func_name, call_args});
          }
 
-         let func;
+         const func_mut = obj_mut[func_name];
+         let baked_func;
          if (BAKE_ASSUME_OBJ_FUNC_LOOKUP_IMMUTABLE) {
-            // We're not supposed to have `obj` during bake
-            const obj = reheat_obj(_element_map);
-            func = obj[func_name];
+            // Assume that obj
+            baked_func = func_mut;
          }
 
-         return (element_map) => { // Reheat `obj.func_name(...)`
-            const obj = reheat_obj(element_map);
+         const replay_spew = window._CRR_REPLAY_SPEW;
+
+         return (element_map, obj) => { // Reheat an actual call!
             const call_args = reheat_call_args(element_map);
+            const func = baked_func || obj[func_name];
             if (!func) {
-               func = obj[func_name];
-               if (!func) {
-                  console.log("Warning: Missing func: " + obj.constructor.name + '.' + func_name);
-                  return;
-               }
+               console.log("Warning: Missing func: " + obj.constructor.name + '.' + func_name);
+               return;
             }
 
-            if (window._CRR_REPLAY_SPEW) {
+            if (replay_spew) {
                console.log(`${ret || '()'} = ${obj}.${func_name}(`, ...call_args, `)`);
             }
 
@@ -330,6 +327,6 @@ class Recording {
          call._is_baked = true;
       }
 
-      return reheat_call(_element_map);
+      return reheat_call(element_map_mut, obj_mut);
    }
 }
