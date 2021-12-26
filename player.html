@@ -17,7 +17,7 @@ Status: <span id='e_status'>-</span>
 <div id='e_sandbox'></div>
 <script>
 
-LogCanvas.stop();
+window.LogCanvas && LogCanvas.stop();
 
 let RECORDING = null;
 
@@ -106,12 +106,17 @@ async function play_button() {
    };
    NOW_PLAYING = state;
 
+   const start = performance.now();
    for (let i = 0; i < RECORDING.frames.length; ++i) {
       await awaitAnimationFrame();
       if (state.stop) return;
 
       RECORDING.play(RECORDING.elem_map, i, i+1);
    }
+   const frames = RECORDING.frames.length;
+   const secs = (performance.now() - start) / 1000;
+   console.log(`Played ${frames} frames in ${secs.toFixed(2)}s`,
+               `(${(frames / secs).toFixed(2)} fps)`);
 }
 
 </script>
