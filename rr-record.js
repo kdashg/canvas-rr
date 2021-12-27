@@ -40,11 +40,36 @@ LogCanvas = (() => {
 
    // -
 
+   function suffix_scaled(val) {
+      const SUFFIX_LIST = ['n', 'u', 'm', '', 'K', 'M', 'G', 'T'];
+      const UNSCALED_SUFFIX = SUFFIX_LIST.indexOf('');
+      let tier = Math.floor((Math.log10(val) / 3));
+      tier += UNSCALED_SUFFIX;
+      tier = Math.max(0, Math.min(tier, SUFFIX_LIST.length-1));
+      tier -= UNSCALED_SUFFIX;
+      const tier_base = Math.pow(1000, tier);
+      return [val / tier_base, SUFFIX_LIST[tier + UNSCALED_SUFFIX]];
+   }
+
+   function to_suffixed(val, fixed) {
+      const [scaled, suffix] = suffix_scaled(val);
+      if (!suffix) return val;
+
+      if (fixed === undefined) {
+         fixed = 2 - (Math.log10(scaled) | 0);
+      }
+      return `${scaled.toFixed(fixed)}${suffix}`;
+   }
+
+   // -
+
+   const should_ignore_set = new WeakSet();
+
    const TO_DATA_URL_C2D = (() => {
       const c = document.createElement('canvas');
-      c._CRR_IGNORE = true;
+      should_ignore_set.add(c);
       const c2d = c.getContext('2d');
-      c2d._CRR_IGNORE = true;
+      should_ignore_set.add(c2d);
       return c2d;
    })();
 
@@ -231,11 +256,15 @@ LogCanvas = (() => {
          return undefined;
       }
 
+      key_by_obj = new WeakMap();
+
       obj_key(obj) {
          if (!obj) return null;
-         if (obj._lc_key) return obj._lc_key;
+         let key = this.key_by_obj.get(obj);
+         if (key) return key;
 
-         const key = obj._lc_key = '$' + this.new_id();
+         key = '$' + this.new_id();
+         this.key_by_obj.set(obj, key);
 
          const info = {
             type: obj.constructor.name,
@@ -248,10 +277,15 @@ LogCanvas = (() => {
          return key;
       }
 
+      prev_snapshot_key_by_obj = new WeakMap();
+
       pickle_obj(obj, func_name, arg_id) {
          if (!obj) return null;
 
-         if (obj._lc_key) return obj._lc_key;
+         {
+            const key = this.key_by_obj.get(obj);
+            if (key) return key;
+         }
 
          if (arg_id == -1) {
             // Return values can be ignored.
@@ -272,7 +306,7 @@ LogCanvas = (() => {
             if (!val_str.startsWith('data:') && val_str.length <= SNAPSHOT_INLINE_LEN) {
                return '=' + val_str;
             }
-            const prev_key = obj._lc_snapshot_key;
+            const prev_key = this.prev_snapshot_key_by_obj.get(obj);
             if (prev_key) {
                // Has previous snapshot, but data might have changed.
                const prev_val_str = this.snapshots[prev_key];
@@ -295,7 +329,7 @@ LogCanvas = (() => {
                console.warning(`Collision while de-duping snapshot -> ${key}`);
             }
 
-            obj._lc_snapshot_key = key;
+            this.prev_snapshot_key_by_obj.set(obj, key);
             this.snapshots[key] = val_str;
             return key;
          }
@@ -325,7 +359,7 @@ LogCanvas = (() => {
          const slog = new SplitLogger('to_json_arr');
 
          const elem_info_json = JSON.stringify(this.elem_info_by_key, null, 3);
-         slog.log(`${elem_info_json.length} bytes of elem_info_json.`);
+         slog.log(`${to_suffixed(elem_info_json.length)} bytes of elem_info_json.`);
 
          function chunk(src, chunk_size) {
             const ret = [];
@@ -388,7 +422,7 @@ LogCanvas = (() => {
          for (const x of parts) {
             size += x.length;
          }
-         slog.log(`${size} bytes in ${parts.length} parts...`);
+         slog.log(`${to_suffixed(size)} bytes in ${to_suffixed(parts.length)} parts...`);
 
          let join = '';
          for (const x of parts) {
@@ -478,14 +512,13 @@ LogCanvas = (() => {
       'getParameter': true,
    };
 
-   function inject_observer() {
-      if (window._CRR_NO_INJECT) return;
-      window._CRR_NO_INJECT = true;
+   const is_hooked_set = new WeakSet();
 
+   function inject_observer() {
       console.log(`[LogCanvas@${window.origin}] Injecting for`, window.location);
 
       function fn_observe(obj, k, args, ret) {
-         if (obj._CRR_IGNORE) return;
+         if (should_ignore_set.has(obj)) return;
          if (!RECORDING_FRAMES) return;
 
          if (IGNORED_FUNCS[k]) return;
@@ -493,9 +526,9 @@ LogCanvas = (() => {
          RECORDING.pickle_call(obj, k, args, ret);
 
          if (k == 'getExtension') {
-            if (ret && !ret.__proto__._CRR_HOOKED) {
+            if (ret && !is_hooked_set.has(ret.__proto__)) {
                //console.log(`[LogCanvas@${window.origin}] getExtension`, args);
-               ret.__proto__._CRR_HOOKED = true;
+               is_hooked_set.add(ret.__proto__);
                hook_props(ret.__proto__, fn_observe);
             }
          }
@@ -557,7 +590,14 @@ LogCanvas = (() => {
             RECORDING.frames.forEach(frame_calls => {
                calls += frame_calls.length;
             });
-            console.log(`[LogCanvas@${window.origin}] ${RECORDING.frames.length}/${n} frames recorded! (${calls} calls)`);
+            if (!calls) {
+               console.log(`[LogCanvas@${window.origin}]`,
+                           `Recording ended with 0 calls.`);
+               return;
+            }
+            console.log(`[LogCanvas@${window.origin}]`,
+                        `${RECORDING.frames.length}/${n} frames recorded!`,
+                        `(${to_suffixed(calls)} calls)`);
             return;
          }
          RECORDING.new_frame();
