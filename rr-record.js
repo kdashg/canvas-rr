@@ -10,6 +10,12 @@ LogCanvas = (() => {
 
    // -
 
+   const GLOBAL = {
+      suspend_observation: false,
+   };
+
+   // -
+
    // MS Fishbowl overrides window.performance with its own custom
    // object for some reason, so save this before Fishbowl has a chance
    // to mess with it.
@@ -436,6 +442,211 @@ LogCanvas = (() => {
 
    // -
 
+   /*
+   The core to our start-in-the-middle recording strategy:
+   * Always record all the reflection info we might need into a
+     WeakMap, so that if we never use it, it gets collected normally.
+   * When recording begins, the first time we hit these objects, we
+     dump their current state and data, so that we can recreate them
+     during/before replay.
+
+   Note that we already have sufficient reflection APIs for:
+   * RenderingContext
+   * Buffer in WebGL2 (WebGL1 can shadow data instead)
+   * Framebuffer
+   * Renderbuffer
+   * Sampler
+   * Shader
+   * TransformFeedback if !TRANSFORM_FEEDBACK_ACTIVE
+      * even if TRANSFORM_FEEDBACK_PAUSED!
+      * Active TFOs have a 'cursor' based on previous *valid* draws,
+        which is really hard to track and replicate efficiently.
+      * But TFOs are generally really rare, so we can add this
+        Eventually(tm).
+   * VertexArray
+
+   What we need to gather ourselves:
+   * Buffer in WebGL1 (shadow uploaded data)
+   * Extension
+      * which ones have been enabled?
+      * `parent`
+   * Program
+      * Last-linked shader sources, since those
+        might be different from the current shaders sources, and there
+        may even be no shaders attached anymore!
+   * Texture
+      * levels and level info
+      * Shadowed data if compressed.
+   * UniformLocation
+      * Program and name, so we can recreate it
+   */
+
+   // What we can ignore:
+   // * Sync
+   // * Query
+
+   const reflection_info_by_obj = new WeakMap();
+
+   function ensure_reflection_info(obj) {
+      let ret = reflection_info_by_obj.get(obj);
+      if (ret === undefined) {
+         ret = {};
+         reflection_info_by_obj.set(obj, ret);
+      }
+      return ret;
+   }
+
+   const REFLECTION_OBSERVER_BY_FUNC_NAME = {};
+
+   // -
+
+   function init_webgl_state(state) {
+      // Oh gods, there's so much to put here...
+      state.enabled_ext_by_name = {};
+   }
+
+   REFLECTION_OBSERVER_BY_FUNC_NAME.getContext =
+         (canvas, func_name, args, new_context) => {
+      const [name, attribs] = args;
+      if (reflection_info_by_obj.has(new_context)) return;
+
+      const r_canvas = ensure_reflection_info(canvas);
+      r_canvas.context = [name, attribs];
+
+      const r_context = ensure_reflection_info(canvas);
+      if (r_context.getExtensions) {
+         init_webgl_state(r_context);
+      }
+   };
+
+   REFLECTION_OBSERVER_BY_FUNC_NAME.getExtension =
+         (webgl, func_name, args, new_obj) => {
+      if (!new_obj) return;
+      const [name] = args;
+      const r_ext = ensure_reflection_info(new_obj);
+      r_ext.webgl = webgl;
+      const r_webgl = ensure_reflection_info(webgl);
+      r_webgl.enabled_exts[name] = new_obj;
+   };
+
+   // -
+   // Buffers
+
+   REFLECTION_OBSERVER_BY_FUNC_NAME.createBuffer =
+         (webgl, func_name, args, new_obj) => {
+      const r_webgl = ensure_reflection_info(webgl);
+      if (r_webgl.is_webgl2) return;
+
+      const r_buffer = ensure_reflection_info(new_obj);
+      // We don't have getBufferSubData, but also buffer data is
+      // immutable in webgl1, so just shadow it.
+      r_buffer.shadow_bytes = new Uint8Array();
+   };
+
+   function as_typed_array(ab_or_abv) {
+      if (ab_or_abv instanceof ArrayBuffer) {
+         return new Uint8Array(ab_or_abv);
+      }
+      if (window.SharedArrayBuffer &&
+          ab_or_abv instanceof SharedArrayBuffer) {
+         return new Uint8Array(ab_or_abv);
+      }
+      if (ab_or_abv.buffer instanceof ArrayBuffer) {
+         // Note: DataViews *are* ArrayBufferViews, but not TypedArrays.
+         if (ab_or_abv instanceof DataView) {
+            return new Uint8Array(ab_or_abv.buffer,
+               ab_or_abv.byteOffset, ab_or_abv.byteLength);
+         }
+         return ab_or_abv;
+      }
+      return undefined;
+   }
+
+   REFLECTION_OBSERVER_BY_FUNC_NAME.bufferData =
+         (webgl, func_name, args, ret) => {
+      const [target, srcOrSize, usage, srcOffset, length] = args;
+      const r_webgl = ensure_reflection_info(webgl);
+      if (r_webgl.is_webgl2) return;
+
+      const buffer = r_webgl.state.buffer_by_target[target];
+      if (!buffer) return;
+      const r_buffer = ensure_reflection_info(buffer);
+
+      let src_view = as_typed_array(srcOrSize);
+      let ab_copy;
+      if (src_view) {
+         src_view = src_view.subarray(srcOffset, length);
+         ab_copy = src_view.buffer.slice();
+      } else if (typeof srcOrSize == 'number') {
+         ab_copy = new ArrayBuffer(srcOrSize);
+      } else if (srcOrSize === null) {
+         // Ok buddy, technically allowed by webidl, but this is an
+         // INVALID_VALUE error anyway.
+         return;
+      } else {
+         console.error('bufferData', {srcOrSize}); // ???
+         return;
+      }
+      r_buffer.shadow_bytes = new Uint8Array(ab_copy);
+   };
+
+   REFLECTION_OBSERVER_BY_FUNC_NAME.bufferSubData =
+         (webgl, func_name, args, ret) => {
+      const [target, dstByteOffset, src, srcOffset, length] = args;
+      const r_webgl = ensure_reflection_info(webgl);
+      if (r_webgl.is_webgl2) return;
+
+      const buffer = r_webgl.state.buffer_by_target[target];
+      if (!buffer) return;
+      const r_buffer = ensure_reflection_info(buffer);
+
+      let src_view = as_typed_array(src);
+      src_view = src_view.subarray(srcOffset, length);
+      const src_byte_view = new Uint8Array(src_view.buffer,
+         src_view.byteOffset, src_view.byteLength);
+
+      r_buffer.shadow_bytes.set(src_byte_view, dstByteOffset);
+   };
+
+   // -
+
+   REFLECTION_OBSERVER_BY_FUNC_NAME.createTexture =
+         (parent, func_name, args, new_obj) => {
+      const r_tex = ensure_reflection_info(new_obj);
+      r_tex.levels = {};
+   };
+   REFLECTION_OBSERVER_BY_FUNC_NAME.linkProgram =
+         (webgl, func_name, args, new_obj) => {
+      const [prog] = args;
+      const r_prog = ensure_reflection_info(prog);
+      r_prog.compiled_shaders = [];
+
+      GLOBAL.suspend_observation = true;
+      {
+         const shaders = webgl.getAttachedShaders(prog);
+         for (const shader of shaders) {
+            if (!webgl.getShaderParameter(webgl.COMPILE_STATUS)) {
+               continue;
+            }
+            const info = {
+               type: webgl.getShaderParameter(shader, webgl.SHADER_TYPE),
+               source: webgl.getShaderSource(shader),
+            };
+            r_prog.compiled_shaders.push(info);
+         }
+      }
+      GLOBAL.suspend_observation = false;
+   };
+   REFLECTION_OBSERVER_BY_FUNC_NAME.getUniformLocation =
+         (webgl, func_name, args, new_obj) => {
+      const [prog, name] = args;
+      const r_loc = ensure_reflection_info(new_obj);
+      r_loc.prog = prog;
+      r_loc.name = name;
+   };
+
+   // -
+
    const DONT_HOOK = {
       'constructor': true,
    };
@@ -506,7 +717,7 @@ LogCanvas = (() => {
    const HOOK_CTOR_LIST = [
       Path2D,
    ];
-   const IGNORED_FUNCS = {
+   const DO_NOT_RECORD_FUNCS = {
       'toDataURL': true,
       'getTransform': true,
       'getParameter': true,
@@ -518,12 +729,8 @@ LogCanvas = (() => {
       console.log(`[LogCanvas@${window.origin}] Injecting for`, window.location);
 
       function fn_observe(obj, k, args, ret) {
+         if (GLOBAL.suspend_observation) return;
          if (should_ignore_set.has(obj)) return;
-         if (!RECORDING_FRAMES) return;
-
-         if (IGNORED_FUNCS[k]) return;
-
-         RECORDING.pickle_call(obj, k, args, ret);
 
          if (k == 'getExtension') {
             if (ret && !is_hooked_set.has(ret.__proto__)) {
@@ -532,6 +739,12 @@ LogCanvas = (() => {
                hook_props(ret.__proto__, fn_observe);
             }
          }
+
+         if (!RECORDING_FRAMES) return;
+
+         if (DO_NOT_RECORD_FUNCS[k]) return;
+
+         RECORDING.pickle_call(obj, k, args, ret);
       }
 
       for (const cur of HOOK_LIST) {
@@ -543,6 +756,8 @@ LogCanvas = (() => {
          const hook_class = class extends cur {
             constructor() {
                super(...arguments);
+               if (GLOBAL.suspend_observation) return;
+               if (!RECORDING_FRAMES) return;
                RECORDING.pickle_call(null, 'new ' + name, arguments, this);
             }
          };
