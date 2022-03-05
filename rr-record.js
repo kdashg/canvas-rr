@@ -608,6 +608,30 @@ LogCanvas = (() => {
       r_buffer.shadow_bytes.set(src_byte_view, dstByteOffset);
    };
 
+   function without_observation(fn) {
+      const was = GLOBAL.suspend_observation;
+      GLOBAL.suspend_observation = true;
+
+      const ret = fn();
+
+      GLOBAL.suspend_observation = was;
+      return ret;
+   }
+
+   const KIND_BY_BUFFER = new WeakMap();
+
+   function snapshot_webglbuffer(webgl, buffer) {
+      without_observation(() => {
+         let target = GL.ARRAY_BUFFER;
+         let binding = GL.ARRAY_BUFFER_BINDING;
+         let was = gl.getParameter(binding);
+         gl.bindBuffer(target, buffer);
+         if (gl.getParameter(binding) != buffer) {
+            // Oops, it must be
+
+      });
+   }
+
    // -
 
    REFLECTION_OBSERVER_BY_FUNC_NAME.createTexture =
