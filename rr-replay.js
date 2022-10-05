@@ -202,6 +202,10 @@ class Recording {
             elem = document.createElement('canvas');
             elem.width = info.width;
             elem.height = info.height;
+         } else if (info.type == 'OffscreenCanvas') {
+            elem = new OffscreenCanvas(1,1);
+            elem.width = info.width;
+            elem.height = info.height;
          } else if (info.type == 'CanvasRenderingContext2D') {
             if (info.canvas) {
                const c = make_elem(info.canvas);

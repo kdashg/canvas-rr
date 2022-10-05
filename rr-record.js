@@ -7,6 +7,7 @@ LogCanvas = (() => {
    const SNAPSHOT_INLINE_LEN = 100;
    const READABLE_SNAPSHOTS = false;
    const DEDUPE_SNAPSHOTS = true;
+   const LOG_CALL_NAME_LIST = []; // ['getContext', 'getExtension']
 
    // -
 
@@ -269,7 +270,7 @@ LogCanvas = (() => {
          const info = {
             type: obj.constructor.name,
          };
-         if (info.type == 'HTMLCanvasElement') {
+         if (['HTMLCanvasElement', 'OffscreenCanvas'].includes(info.type)) {
             info.width = obj.width;
             info.height = obj.height;
             this.elem_info_by_key[key] = info;
@@ -349,6 +350,9 @@ LogCanvas = (() => {
       }
 
       pickle_call(obj, func_name, call_args, call_ret) {
+         if (LOG_CALL_NAME_LIST.includes(func_name)) {
+            console.log('pickle_call', ...arguments);
+         }
          const obj_key = this.obj_key(obj);
          const args = [].map.call(call_args, (x,i) => this.pickle_arg(x, func_name, i));
          const ret = this.pickle_arg(call_ret, func_name, -1);
@@ -498,6 +502,7 @@ LogCanvas = (() => {
 
    const HOOK_LIST = [
       HTMLCanvasElement,
+      OffscreenCanvas,
       CanvasRenderingContext2D,
       Path2D,
       WebGLRenderingContext,
