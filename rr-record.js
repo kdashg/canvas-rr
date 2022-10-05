@@ -1,5 +1,5 @@
 LogCanvas = (() => {
-   const RECORDING_VERSION = 4;
+   const RECORDING_VERSION = 5;
    const AUTO_RECORD_FRAMES = 3 * 60;
    const SKIP_EMPTY_FRAMES = true;
    const SNAPSHOT_LINE_WRAP = 100;

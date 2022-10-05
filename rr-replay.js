@@ -1,6 +1,6 @@
 'use strict';
 
-const RECORDING_VERSION = 4;
+const RECORDING_VERSION = 5;
 const BAKE_AND_REHEAT_CALLS = false;
 const BAKE_ASSUME_OBJ_FUNC_LOOKUP_IMMUTABLE = true;
 const DEDUPE_STRINGS = true;
