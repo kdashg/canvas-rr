@@ -260,6 +260,7 @@ class Recording {
       const call = this.frames[frame_id][call_id];
       const [elem_key, func_name, args, ret] = call;
       //console.log(call);
+      if (func_name == 'throw') throw {frame_id, call_id, call};
 
       // `call` is fixed. as is `this.snapshots`.
       // `element_map` is mutable though!
@@ -378,13 +379,14 @@ class Recording {
 
          const replay_spew = window._CRR_REPLAY_SPEW;
 
-         return (element_map, obj) => { // Reheat an actual call!
+         return (element_map, obj, frame_id, call_id) => { // Reheat an actual call!
             const call_args = reheat_call_args(element_map);
             const func = baked_func || obj[func_name];
             if (!func) {
                console.log("Warning: Missing func: " + obj.constructor.name + '.' + func_name);
                return;
             }
+
 
             if (replay_spew) {
                console.log(`${ret || '()'} = ${obj}.${func_name}(`, ...call_args, `)`);
@@ -400,7 +402,14 @@ class Recording {
                   element_map[ret] = call_ret;
                }
             }
-
+            if (ret && typeof ret == 'number') {
+               if (call_ret != ret) {
+                  console.error(
+                     `[${+frame_id+1}:${+call_id+1}]` +
+                     ` ${obj}.${func_name}(${call_args.join(', ')})` +
+                     ` -> ${call_ret}, expected ${ret}!`);
+               }
+            }
             if (SPEW_ON_GL_ERROR) {
                check_error('after', obj, call_args);
             }
@@ -413,6 +422,6 @@ class Recording {
          call._is_baked = true;
       }
 
-      return reheat_call(element_map_mut, obj_mut);
+      return reheat_call(element_map_mut, obj_mut, frame_id, call_id);
    }
 }

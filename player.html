@@ -4,7 +4,13 @@
       <meta charset=utf-8>
       <script src='rr-replay.js'></script>
    </head>
-   <body>
+   <body style='width:100vw; height:100vh; margin:0px; display:flex; flex-direction:column;'>
+<style>
+   .indent {
+      padding-left: 1em;
+   }
+</style>
+<div>
 Recording: <input id='fileInput' type='file' accept='.json'
                   onchange='file_input_changed(this.files[0])'/>
 <br/>
@@ -13,8 +19,18 @@ Status: <span id='e_status'>-</span>
 <hr/>
 <button onclick='reset_button()'>Reset</button>
 <button onclick='play_button()'>Play</button>
+<button onclick='show_snapshots()'>Show snapshots</button>
+</div>
 <hr/>
-<div id='e_sandbox'></div>
+<div style='flex:1; contain:size; display:flex;'>
+   <div style='resize:horizontal; overflow:scroll; width:30%; border-right:2px solid black;'>
+      <div id=e_sidebar></div>
+   </div>
+   <div style='flex:1; overflow:scroll;'>
+      <div id='e_sandbox'></div>
+      <div id='e_snapshots'></div>
+   </div>
+</div>
 <script>
 
 window.LogCanvas && LogCanvas.stop();
@@ -56,6 +72,34 @@ async function file_input_changed(blob) {
    e_status.textContent = 'Loading...';
    RECORDING = await Recording.from_json(json);
    slog.log(`Loaded ${RECORDING.frames.length} frames.`);
+
+   e_status.textContent = 'Initializing...';
+   remove_all_children(e_sidebar);
+   let call_count = 0;
+   const eroot = add_child(e_sidebar, 'details');
+   eroot.classList.add('indent');
+   let summ = add_child(eroot, 'summary');
+   summ.textContent = `${blob.name}: ${RECORDING.frames.length} frames in ${to_suffixed(blob.size)}B`;
+   for (const fid in RECORDING.frames) {
+      const f = RECORDING.frames[fid];
+      const fdet = add_child(eroot, 'details');
+      fdet.classList.add('indent');
+      summ = add_child(fdet, 'summary');
+      summ.textContent = `Frame ${+fid+1}: ${f.length} calls`;
+      for (const cid in f) {
+         const c = f[cid];
+         const [obj, cname, args, ret] = c;
+         const pre = add_child(fdet, 'pre');
+         pre.classList.add('indent');
+         let retstr = '';
+         if (ret) {
+            retstr = ` -> ${ret}`;
+         }
+         pre.textContent = `[${+fid+1}:${+cid+1}] ${obj} . ${cname} ( ${args.join(' , ')} )${retstr}`;
+         call_count += 1;
+      }
+   }
+   slog.log(`Initialized ${call_count} calls.`);
 
    e_status.textContent = 'Ready.';
 }
@@ -119,6 +163,42 @@ async function play_button() {
                `(${(frames / secs).toFixed(2)} fps)`);
 }
 
+
+function add_child(parent, what) {
+   const ret = document.createElement(what);
+   parent.appendChild(ret);
+   return ret;
+}
+
+function show_snapshot(key) {
+   const s = RECORDING.snapshots[key];
+   if (!s) throw `Bad key: ${key}`;
+
+   add_child(e_snapshots, 'br');
+   const ecur = add_child(e_snapshots, 'div');
+   const ekey = add_child(ecur, 'b');
+   ekey.textContent = `${key}: <${s.constructor.name}>: `;
+
+   if (s instanceof HTMLImageElement) {
+      ecur.appendChild(s);
+      s.style.verticalAlign = 'middle';
+   } else if (s.constructor.name == 'Object') {
+      const es = add_child(ecur, 'span');
+      es.textContent = JSON.stringify(s);
+   } else if (s.length) {
+      const es = add_child(ecur, 'span');
+      es.textContent = `{length: ${s.length}}`;
+   }
+}
+
+async function show_snapshots() {
+   remove_all_children(e_snapshots);
+
+   for (const [key, s] of Object.entries(RECORDING.snapshots)) {
+      console.log({key, s});
+      show_snapshot(key);
+   }
+}
 </script>
    </body>
 </html>
