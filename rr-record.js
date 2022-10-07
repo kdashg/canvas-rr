@@ -1,4 +1,6 @@
 LogCanvas = (() => {
+   const GL = WebGL2RenderingContext;
+
    const RECORDING_VERSION = 5;
    const AUTO_RECORD_FRAMES = 3 * 60;
    const SKIP_EMPTY_FRAMES = true;
@@ -7,7 +9,13 @@ LogCanvas = (() => {
    const SNAPSHOT_INLINE_LEN = 100;
    const READABLE_SNAPSHOTS = false;
    const DEDUPE_SNAPSHOTS = true;
-   const LOG_CALL_NAME_LIST = []; // ['getContext', 'getExtension']
+   const LOG_CALL_NAME_LIST = [
+      //'linkProgram', 'bindAttribLocation',
+      //'getParameter',
+   ];
+   const LINK_PROGRAM_INJECT_BIND_ATTRIB_LOCATION = true;
+   const GET_PARAMETER_OVERRIDES = {};
+   //GET_PARAMETER_OVERRIDES[GL.MAX_TEXTURE_SIZE] = 8192;
 
    // -
 
@@ -469,9 +477,9 @@ LogCanvas = (() => {
             //console.log(`hooking func: ${obj.constructor.name}.${k}`);
             const was = desc.value;
             desc.value = function() {
-               const ret = was.apply(this, arguments);
+               let ret = was.apply(this, arguments);
                try {
-                  fn_observe(this, k, arguments, ret);
+                  ret = fn_observe(this, k, arguments, ret);
                } catch (e) {
                   console.error(e);
                   throw e;
@@ -514,7 +522,7 @@ LogCanvas = (() => {
    const IGNORED_FUNCS = {
       'toDataURL': true,
       'getTransform': true,
-      'getParameter': true,
+      //'getParameter': true,
    };
 
    const is_hooked_set = new WeakSet();
@@ -523,10 +531,10 @@ LogCanvas = (() => {
       console.log(`[LogCanvas@${window.origin}] Injecting for`, window.location);
 
       function fn_observe(obj, k, args, ret) {
-         if (should_ignore_set.has(obj)) return;
-         if (!RECORDING_FRAMES) return;
+         if (should_ignore_set.has(obj)) return ret;
+         if (!RECORDING_FRAMES) return ret;
 
-         if (IGNORED_FUNCS[k]) return;
+         if (IGNORED_FUNCS[k]) return ret;
 
          RECORDING.pickle_call(obj, k, args, ret);
 
@@ -537,6 +545,35 @@ LogCanvas = (() => {
                hook_props(ret.__proto__, fn_observe);
             }
          }
+
+         if (k == 'getParameter') {
+            const override = GET_PARAMETER_OVERRIDES[args[0]];
+            console.log({GET_PARAMETER_OVERRIDES, args, ret});
+            if (override !== undefined) {
+               console.log(`getParameter(0x${args[0].toString(16)}) -> ${ret} -> ${override}`);
+               ret = override;
+            }
+         }
+
+         if (LINK_PROGRAM_INJECT_BIND_ATTRIB_LOCATION && k == 'linkProgram') {
+            const was = RECORDING_FRAMES;
+            RECORDING_FRAMES = 0; // Prevent re-entrancy.
+
+            const gl = obj;
+            const prog = args[0];
+            const n = gl.getProgramParameter(prog, gl.ACTIVE_ATTRIBUTES);
+            for (let i = 0; i < n; i++) {
+               const aa = gl.getActiveAttrib(prog, i);
+               const loc = gl.getAttribLocation(prog, aa.name);
+               console.assert(loc != -1, {i, aa, loc});
+               RECORDING.pickle_call(gl, 'bindAttribLocation', [prog, loc, aa.name]);
+            }
+            RECORDING.pickle_call(gl, 'linkProgram', [prog]);
+
+            RECORDING_FRAMES = was;
+         }
+
+         return ret;
       }
 
       for (const cur of HOOK_LIST) {
