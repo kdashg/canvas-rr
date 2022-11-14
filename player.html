@@ -35,6 +35,20 @@ Status: <span id='e_status'>-</span>
 
 window.LogCanvas && LogCanvas.stop();
 
+// Polyfill Blob.text for browsers like Safari 14 that don't have it
+if (!Blob.prototype.text) {
+   Blob.prototype.text = function() {
+      const reader = new FileReader();
+      const p = new Promise((resolve) => {
+         reader.addEventListener("load", () => {
+            resolve(reader.result);
+         }, false);
+      });
+      reader.readAsText(this);
+      return p;
+   }
+}
+
 let RECORDING = null;
 
 class SplitLogger {
