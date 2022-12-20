@@ -15,8 +15,11 @@ def from_script(src):
 (() => {
    if (!(document instanceof HTMLDocument)) return;
 
-   const script = document.createElement('script');
-   script.textContent = escaped_file(); // Move this big string to the end.
+   const blob = new self.Blob([escaped_file()], // Move this big string to the end.
+                              { type: 'text/javascript' });
+   const url = self.URL.createObjectURL(blob);
+   let script = document.createElement('script');
+   script.src = url;
    document.documentElement.append(script);
 
    function escaped_file() {
