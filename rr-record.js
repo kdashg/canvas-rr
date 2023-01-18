@@ -369,7 +369,7 @@ LogCanvas = (() => {
                key = root_key + '.' + collision_id;
             }
             if (collision_id) {
-               console.warning(`Collision while de-duping snapshot -> ${key}`);
+               console.warn(`Collision while de-duping snapshot -> ${key}`);
             }
 
             this.prev_snapshot_key_by_obj.set(obj, key);
