@@ -74,13 +74,15 @@ LogCanvas = (() => {
 
    const should_ignore_set = new WeakSet();
 
-   const TO_DATA_URL_C2D = (() => {
+   function new_ignored_c2d() {
       const c = document.createElement('canvas');
       should_ignore_set.add(c);
       const c2d = c.getContext('2d');
       should_ignore_set.add(c2d);
       return c2d;
-   })();
+   }
+
+   let TO_DATA_URL_C2D = new_ignored_c2d();
 
    function to_data_url(src, w, h) {
       if (src.toDataURL) return src.toDataURL();
@@ -91,13 +93,26 @@ LogCanvas = (() => {
          w = (w >> 1) || 1;
          h = (h >> 1) || 1;
       }
-
-      const c2d = TO_DATA_URL_C2D;
+      let c2d = TO_DATA_URL_C2D;
       c2d.canvas.width = w;
       c2d.canvas.height = h;
       c2d.drawImage(src, 0, 0, w, h);
 
-      const ret = c2d.canvas.toDataURL();
+      let ret;
+      try {
+         ret = c2d.canvas.toDataURL();
+      } catch (e) {
+         if (e instanceof DOMException &&
+             e.name == 'SecurityError') {
+            console.warn('After', c2d, '.drawImage(', src, '), ', c2d.canvas, '.toDataURL() failed with', e.name, ', recording black:', e);
+            c2d = TO_DATA_URL_C2D = new_ignored_c2d();
+            c2d.canvas.width = w;
+            c2d.canvas.height = h;
+            ret = c2d.canvas.toDataURL();
+         } else {
+            throw e;
+         }
+      }
       if (ret == "data:,") throw 0; // Encoder failed.
 
       if (src instanceof HTMLImageElement) {
@@ -450,6 +465,7 @@ LogCanvas = (() => {
 
    const DONT_HOOK = {
       'constructor': true,
+      'toDataURL': true,
    };
 
    function hook_props(obj, fn_observe) {
@@ -477,7 +493,12 @@ LogCanvas = (() => {
             //console.log(`hooking func: ${obj.constructor.name}.${k}`);
             const was = desc.value;
             desc.value = function() {
-               let ret = was.apply(this, arguments);
+               let ret;
+               try {
+                  ret = was.apply(this, arguments);
+               } catch (e) {
+                  console.error(e, 'from', obj, `.${k}(`, ...arguments, `)`);
+               }
                try {
                   ret = fn_observe(this, k, arguments, ret);
                } catch (e) {
