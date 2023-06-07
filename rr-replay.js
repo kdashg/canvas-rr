@@ -44,12 +44,17 @@ function from_data_snapshot(str) {
       return JSON.parse(data);
    }
 
-   if (data[0] == '*') {
-      data = parseInt(data.slice(1));
-   } else if (data[0] == '^') {
-      data = Base64.decode(data.slice(1));
-   } else {
-      data = JSON.parse('[' + data + ']');
+   try {
+      if (data[0] == '*') {
+         data = parseInt(data.slice(1));
+      } else if (data[0] == '^') {
+         data = Base64.decode(data.slice(1));
+      } else {
+         data = JSON.parse('[' + data + ']');
+      }
+   } catch (e) {
+      console.error('Unexpected', e, 'while parsing data:', data);
+      throw e;
    }
 
    if (type === 'ArrayBuffer') {
