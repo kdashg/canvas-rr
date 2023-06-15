@@ -39,8 +39,8 @@ For WebGL and Canvas2D.
    (you don't have to wait for all the frames to finish recording)
    Note: Recordings are often tens to hundreds of megabytes
 
-# Replay
+# Replay: Using [player.html](https://kdashg.github.io/canvas-rr/player.html)
 
-1. Load `player.html`
+1. Load player.html
 2. Choose a json to load
 3. Hit "Play"
