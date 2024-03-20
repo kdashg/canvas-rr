@@ -136,7 +136,13 @@ LogCanvas = (() => {
    const Base64 = {
       encode: dec_ab => {
          const dec_u8a = new Uint8Array(dec_ab);
-         const dec_bstr = String.fromCodePoint(...dec_u8a);
+         let remaining = dec_u8a;
+         let dec_bstr = "";
+         while (remaining.length) {
+            const chunk = remaining.slice(0, 1000);
+            remaining = remaining.slice(1000);
+            dec_bstr += String.fromCodePoint(...chunk);
+         }
          const enc = btoa(dec_bstr);
          return enc;
       },
@@ -262,10 +268,14 @@ LogCanvas = (() => {
          case 'HTMLCanvasElement':
          case 'HTMLImageElement':
          case 'HTMLVideoElement':
+         case 'ImageData':
             return [to_data_url(obj)];
+
+         case 'CanvasRenderingContext2D':
+         case 'WebGLRenderingContext':
+         case 'WebGL2RenderingContext':
+            return undefined;
          }
-         if (type.startsWith('WebGL')) return undefined;
-         if (type == 'CanvasRenderingContext2D') return undefined;
 
          if (type == 'Object') {
             const str = JSON.stringify(obj);
@@ -569,7 +579,6 @@ LogCanvas = (() => {
 
          if (k == 'getParameter') {
             const override = GET_PARAMETER_OVERRIDES[args[0]];
-            console.log({GET_PARAMETER_OVERRIDES, args, ret});
             if (override !== undefined) {
                console.log(`getParameter(0x${args[0].toString(16)}) -> ${ret} -> ${override}`);
                ret = override;
