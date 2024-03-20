@@ -12,6 +12,7 @@ LogCanvas = (() => {
    const LOG_CALL_NAME_LIST = [
       //'linkProgram', 'bindAttribLocation',
       //'getParameter',
+      //'bindBuffer', 'bufferData', 'bufferSubData',
    ];
    const LINK_PROGRAM_INJECT_BIND_ATTRIB_LOCATION = true;
    const GET_PARAMETER_OVERRIDES = {};

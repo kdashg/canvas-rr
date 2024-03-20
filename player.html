@@ -9,6 +9,12 @@
    .indent {
       padding-left: 1em;
    }
+   .playing {
+      background-color: #ee7;
+   }
+   .played {
+      background-color: #7e7;
+   }
 </style>
 <div>
 Recording: <input id='fileInput' type='file' accept='.json'
@@ -34,6 +40,41 @@ Status: <span id='e_status'>-</span>
 <script>
 
 window.LogCanvas && LogCanvas.stop();
+
+// -
+// https://dbaron.org/log/20100309-faster-timeouts
+
+// Only add setZeroTimeout to the window object, and hide everything
+// else in a closure.
+(function() {
+   var timeouts = [];
+   var messageName = "zero-timeout-message";
+
+   // Like setTimeout, but only takes a function argument.  There's
+   // no time argument (always zero) and no arguments (you have to
+   // use a closure).
+   function setZeroTimeout(fn) {
+      timeouts.push(fn);
+      window.postMessage(messageName, "*");
+   }
+
+   function handleMessage(event) {
+      if (event.source == window && event.data == messageName) {
+            event.stopPropagation();
+            if (timeouts.length > 0) {
+               var fn = timeouts.shift();
+               fn();
+            }
+      }
+   }
+
+   window.addEventListener("message", handleMessage, true);
+
+   // Add the one thing we want added to the window object.
+   window.setZeroTimeout = setZeroTimeout;
+})();
+
+// -
 
 // Polyfill Blob.text for browsers like Safari 14 that don't have it
 if (!Blob.prototype.text) {
@@ -87,6 +128,8 @@ async function file_input_changed(blob) {
    RECORDING = await Recording.from_json(json);
    slog.log(`Loaded ${RECORDING.frames.length} frames.`);
 
+   const list_e_frame_info = RECORDING.list_e_frame_info = [];
+
    e_status.textContent = 'Initializing...';
    remove_all_children(e_sidebar);
    let call_count = 0;
@@ -94,16 +137,22 @@ async function file_input_changed(blob) {
    eroot.classList.add('indent');
    let summ = add_child(eroot, 'summary');
    summ.textContent = `${blob.name}: ${RECORDING.frames.length} frames in ${to_suffixed(blob.size)}B`;
-   for (const fid in RECORDING.frames) {
+   for (const fid_str in RECORDING.frames) {
+      const fid = fid_str|0;
       const f = RECORDING.frames[fid];
       const fdet = add_child(eroot, 'details');
       fdet.classList.add('indent');
       summ = add_child(fdet, 'summary');
+      list_e_frame_info.push(summ);
+      summ.onclick = ((fid) => { return () => seek_until(fid, 0); })(fid);
+      const list_e_call_info = summ.list_e_call_info = [];
       summ.textContent = `Frame ${+fid+1}: ${f.length} calls`;
       for (const cid in f) {
          const c = f[cid];
          const [obj, cname, args, ret] = c;
          const pre = add_child(fdet, 'pre');
+         list_e_call_info.push(pre);
+         pre.onclick = ((fid,cid) => { return () => seek_until(fid, cid); })(fid,cid);
          pre.classList.add('indent');
          let retstr = '';
          if (ret) {
@@ -115,6 +164,7 @@ async function file_input_changed(blob) {
    }
    slog.log(`Initialized ${call_count} calls.`);
 
+   reset();
    e_status.textContent = 'Ready.';
 }
 
@@ -124,10 +174,26 @@ function remove_all_children(elem) {
    }
 }
 
-let NOW_PLAYING = {};
+let NOW_PLAYING = {
+   next_call: [0,0],
+};
 
 function reset_button() {
+   reset();
+}
+function reset() {
    NOW_PLAYING.stop = true;
+   NOW_PLAYING.next_call = [0,0];
+
+   for (const e_frame_info of RECORDING.list_e_frame_info) {
+      e_frame_info.classList.remove('playing');
+      e_frame_info.classList.remove('played');
+
+      for (const e_call_info of e_frame_info.list_e_call_info) {
+         e_call_info.classList.remove('playing');
+         e_call_info.classList.remove('played');
+      }
+   }
 
    remove_all_children(e_sandbox);
 
@@ -155,26 +221,97 @@ function awaitAnimationFrame() {
    });
 }
 
+function cmp(a,b) {
+   if (a < b) return -1;
+   if (a > b) return 1;
+   return 0;
+}
 
-async function play_button() {
-   reset_button();
+function cmp_arr(a, b) {
+   const len = Math.max(a.length, b.length);
+   for (let i = 0; i < len; i++) {
+      const ret = cmp(a[i], b[i]);
+      if (ret) return ret;
+   }
+   return 0;
+}
 
-   const state = {
-      stop: false,
-   };
-   NOW_PLAYING = state;
+async function seek_until(frame_id,call_id) {
+   await play_until({
+      frame_id,
+      call_id,
+      raf_generator: () => new Promise(setZeroTimeout),
+   });
+}
+
+async function play_until(desc) {
+   //console.log('play_until', {desc, frames:RECORDING.frames});
+   desc = Object.assign({
+      frame_id: RECORDING.frames.length,
+      call_id: 0,
+      raf_generator: () => new Promise(requestAnimationFrame),
+   }, desc);
+
+   const end = [desc.frame_id, desc.call_id];
+   if (cmp_arr(end, NOW_PLAYING.next_call) < 0) {
+      reset();
+   }
 
    const start = performance.now();
-   for (let i = 0; i < RECORDING.frames.length; ++i) {
-      await awaitAnimationFrame();
-      if (state.stop) return;
+   let call_count = 0;
+   let frame_count = 0;
+   while (NOW_PLAYING.next_call[0] < end[0]) {
+      await desc.raf_generator();
 
-      RECORDING.play(RECORDING.elem_map, i, i+1);
+      const fid = NOW_PLAYING.next_call[0];
+      frame_count += 1;
+      call_count += RECORDING.frames[fid].length;
+
+      RECORDING.play_calls(RECORDING.elem_map, fid, NOW_PLAYING.next_call[1]);
+      NOW_PLAYING.next_call = [fid+1, 0];
+
+      const e_frame_info = RECORDING.list_e_frame_info[fid];
+      e_frame_info.classList.add('played');
+      for (const e_call_info of e_frame_info.list_e_call_info) {
+         e_call_info.classList.add('played');
+      }
    }
+   if (NOW_PLAYING.next_call[1] < end[1]) {
+      await desc.raf_generator();
+      const fid = NOW_PLAYING.next_call[0];
+      const e_frame_info = RECORDING.list_e_frame_info[fid];
+      for (let cid = NOW_PLAYING.next_call[1]; cid < end[1]; cid++) {
+         call_count += 1;
+         const e_call_info = e_frame_info.list_e_call_info[cid];
+         e_call_info.classList.add('played');
+      }
+      RECORDING.play_calls(RECORDING.elem_map, fid, NOW_PLAYING.next_call[1], end[1]);
+      NOW_PLAYING.next_call = [end[0], end[1]];
+   }
+
+   {
+      const [fid,cid] = NOW_PLAYING.next_call;
+      const e_frame_info = RECORDING.list_e_frame_info[fid];
+      if (e_frame_info) {
+         e_frame_info.classList.remove('played');
+         e_frame_info.classList.add('playing');
+
+         const e_call_info = e_frame_info.list_e_call_info[cid];
+         if (e_call_info) {
+            e_call_info.classList.remove('played');
+            e_call_info.classList.add('playing');
+         }
+      }
+   }
+
    const frames = RECORDING.frames.length;
    const secs = (performance.now() - start) / 1000;
-   console.log(`Played ${frames} frames in ${secs.toFixed(2)}s`,
+   console.log(`Played ${call_count} calls (${frame_count} frames) in ${secs.toFixed(2)}s`,
                `(${(frames / secs).toFixed(2)} fps)`);
+}
+
+async function play_button() {
+   play_until({});
 }
 
 
@@ -209,7 +346,7 @@ async function show_snapshots() {
    remove_all_children(e_snapshots);
 
    for (const [key, s] of Object.entries(RECORDING.snapshots)) {
-      console.log({key, s});
+      console.log('snapshot:', {key, s});
       show_snapshot(key);
    }
 }

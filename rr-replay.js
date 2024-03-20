@@ -233,24 +233,6 @@ class Recording {
       return elem_map;
    }
 
-   play(element_map, begin, end) {
-      if (!begin.length) {
-         begin = [begin, 0];
-      }
-      end = end || Infinity;
-      if (!end.length) {
-         end = [end, 0];
-      }
-
-      let frame_id = begin[0];
-      let call_id = begin[1];
-      for (; frame_id < end[0]; ++frame_id) {
-         if (frame_id >= this.frames.length) return;
-         this.play_calls(element_map, frame_id, call_id);
-         call_id = 0;
-      }
-   }
-
    play_calls(element_map, frame_id, call_begin, call_end) {
       //console.log(`play_calls(${[].slice.call(arguments)})`);
       call_end = call_end || Infinity;
