@@ -147,7 +147,8 @@ async function file_input_changed(blob) {
       summ.onclick = ((fid) => { return () => seek_until(fid, 0); })(fid);
       const list_e_call_info = summ.list_e_call_info = [];
       summ.textContent = `Frame ${+fid+1}: ${f.length} calls`;
-      for (const cid in f) {
+      for (const cid_str in f) {
+         const cid = cid_str|0;
          const c = f[cid];
          const [obj, cname, args, ret] = c;
          const pre = add_child(fdet, 'pre');
@@ -245,7 +246,6 @@ async function seek_until(frame_id,call_id) {
 }
 
 async function play_until(desc) {
-   //console.log('play_until', {desc, frames:RECORDING.frames});
    desc = Object.assign({
       frame_id: RECORDING.frames.length,
       call_id: 0,
@@ -311,9 +311,13 @@ async function play_until(desc) {
 }
 
 async function play_button() {
+   if (NOW_PLAYING.next_call[0] >= RECORDING.frames.length) {
+      reset();
+   }
    play_until({});
 }
 
+// -
 
 function add_child(parent, what) {
    const ret = document.createElement(what);
