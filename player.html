@@ -144,7 +144,7 @@ async function file_input_changed(blob) {
       fdet.classList.add('indent');
       summ = add_child(fdet, 'summary');
       list_e_frame_info.push(summ);
-      summ.onclick = ((fid) => { return () => seek_until(fid, 0); })(fid);
+      //summ.onclick = ((fid) => { return () => seek_until(fid, 0); })(fid);
       const list_e_call_info = summ.list_e_call_info = [];
       summ.textContent = `Frame ${+fid+1}: ${f.length} calls`;
       for (const cid_str in f) {
@@ -354,6 +354,46 @@ async function show_snapshots() {
       show_snapshot(key);
    }
 }
+
+function step_frame() {
+   let [fid,cid] = NOW_PLAYING.next_call;
+   fid += 1;
+   const f = RECORDING.frames[fid];
+   if (!f) return;
+   seek_until(fid, 0);
+}
+
+function step_call() {
+   let [fid,cid] = NOW_PLAYING.next_call;
+   cid += 1;
+   const f = RECORDING.frames[fid];
+   if (!f) return;
+   const c = f[cid];
+   if (!c) {
+      step_frame();
+      return;
+   }
+   seek_until(fid, cid);
+}
+
+document.body.onkeydown = e => {
+   const pd = (() => {
+      switch (e.key) {
+         case 'ArrowRight': {
+            step_frame();
+            return true;
+         }
+         case 'ArrowDown': {
+            step_call();
+            return true;
+         }
+      }
+   })();
+   if (pd) {
+      e.preventDefault();
+   }
+};
+
 </script>
    </body>
 </html>
