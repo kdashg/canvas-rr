@@ -21,6 +21,12 @@ LogCanvas = (() => {
    //GET_PARAMETER_OVERRIDES[GL.MAX_TEXTURE_SIZE] = 8192;
    const EAT_NONRECORDING_EXCEPTIONS = false;
 
+   let LIMIT_NUMBER_PRECISION = 0;
+   LIMIT_NUMBER_PRECISION = 6; // 1/1M
+   //LIMIT_NUMBER_PRECISION = 7; // 1/10M (f32 is ~1/16M)
+
+   let COMPRESS_IMAGES_ABOVE = 1000 * 1000; // 1MB
+
    // -
 
    // MS Fishbowl overrides window.performance with its own custom
@@ -89,7 +95,17 @@ LogCanvas = (() => {
    let TO_DATA_URL_C2D = new_ignored_c2d();
 
    function to_data_url(src, w, h) {
-      if (src.toDataURL) return src.toDataURL();
+      function toDataURL_with_limit(src) {
+         let ret = src.toDataURL();
+         if (COMPRESS_IMAGES_ABOVE && ret.length >= COMPRESS_IMAGES_ABOVE) {
+            const compressed = src.toDataURL('image/jpeg');
+            console.warn(`[canvas-rr] (compressed ${to_suffixed(ret.length)}B PNG -> ${to_suffixed(compressed.length)}B JPEG)`);
+            ret = compressed;
+         }
+         return ret;
+      };
+
+      if (src.toDataURL) return toDataURL_with_limit(src);
 
       w = w || src.naturalWidth || src.videoWidth || src.width;
       h = h || src.naturalHeight || src.videoHeight || src.height;
@@ -108,7 +124,7 @@ LogCanvas = (() => {
 
       let ret;
       try {
-         ret = c2d.canvas.toDataURL();
+         ret = toDataURL_with_limit(c2d.canvas);
       } catch (e) {
          if (e instanceof DOMException &&
              e.name == 'SecurityError') {
@@ -116,7 +132,7 @@ LogCanvas = (() => {
             c2d = TO_DATA_URL_C2D = new_ignored_c2d();
             c2d.canvas.width = w;
             c2d.canvas.height = h;
-            ret = c2d.canvas.toDataURL();
+            ret = toDataURL_with_limit(c2d.canvas);
          } else {
             throw e;
          }
@@ -406,6 +422,9 @@ LogCanvas = (() => {
          if (!arg) return arg;
          if (arg instanceof Array) return arg.map(x => this.pickle_arg(x, func_name, i));
          if (typeof arg == 'object') return this.pickle_obj(arg, func_name, i);
+         if (typeof arg == 'number' && LIMIT_NUMBER_PRECISION) {
+            arg = +(arg.toPrecision(LIMIT_NUMBER_PRECISION));  // number -> string -> number
+         }
          return arg;
       }
 
