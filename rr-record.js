@@ -10,8 +10,10 @@ LogCanvas = (() => {
    const READABLE_SNAPSHOTS = false;
    const DEDUPE_SNAPSHOTS = true;
    const LOG_CALL_NAME_LIST = [
-      //'linkProgram', 'bindAttribLocation',
+      //'drawImage',
+      //'getContext',
       //'getParameter',
+      //'linkProgram', 'bindAttribLocation',
       //'bindBuffer', 'bufferData', 'bufferSubData',
    ];
    const LINK_PROGRAM_INJECT_BIND_ATTRIB_LOCATION = true;
@@ -127,6 +129,11 @@ LogCanvas = (() => {
             capture: false,
             once: true,
          });
+      }
+      if (src instanceof ImageBitmap) {
+         src.toDataURL = function() {
+            return ret;
+         };
       }
 
       return ret;
@@ -269,6 +276,7 @@ LogCanvas = (() => {
          case 'HTMLCanvasElement':
          case 'HTMLImageElement':
          case 'HTMLVideoElement':
+         case 'ImageBitmap':
          case 'ImageData':
             return [to_data_url(obj)];
 
