@@ -39,7 +39,10 @@ Status: <span id='e_status'>-</span>
 </div>
 <script>
 
-window.LogCanvas && LogCanvas.stop();
+if (window.LogCanvas) {
+   LogCanvas.stop();
+   LogCanvas.EAT_NONRECORDING_EXCEPTIONS = false;
+}
 
 // -
 // https://dbaron.org/log/20100309-faster-timeouts

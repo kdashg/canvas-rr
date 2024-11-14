@@ -19,6 +19,7 @@ LogCanvas = (() => {
    const LINK_PROGRAM_INJECT_BIND_ATTRIB_LOCATION = true;
    const GET_PARAMETER_OVERRIDES = {};
    //GET_PARAMETER_OVERRIDES[GL.MAX_TEXTURE_SIZE] = 8192;
+   const EAT_NONRECORDING_EXCEPTIONS = false;
 
    // -
 
@@ -359,18 +360,30 @@ LogCanvas = (() => {
                const prev_val_str = this.snapshots[prev_key];
                if (val_str == prev_val_str) return prev_key;
             }
+
+            function make_key(uuid, collision_id, obj) {
+               let key = '@' + uuid;
+               if (collision_id) {
+                  key += '.' + collision_id;
+               }
+               if (obj.constructor.name == 'ImageData') {
+                  key += ':' + [obj.constructor.name, obj.width, obj.height].join(',');
+               }
+               return key;
+            };
+
             let uuid = hash;
             if (!uuid) {
                uuid = this.new_id();
             }
-            const root_key = '@' + uuid;
             let collision_id = 0;
-            let key = root_key;
+
+            let key = make_key(uuid, collision_id, obj);
             while (this.snapshots[key]) {
                //console.log(`Deduping ${key} (${val_str.length} chars)`);
                if (this.snapshots[key] == val_str) break;
                collision_id += 1;
-               key = root_key + '.' + collision_id;
+               key = make_key(uuid, collision_id, obj);
             }
             if (collision_id) {
                console.warn(`Collision while de-duping snapshot -> ${key}`);
@@ -378,6 +391,7 @@ LogCanvas = (() => {
 
             this.prev_snapshot_key_by_obj.set(obj, key);
             this.snapshots[key] = val_str;
+
             return key;
          }
 
@@ -517,17 +531,23 @@ LogCanvas = (() => {
             const was = desc.value;
             desc.value = function() {
                let ret;
-               try {
+               if (!RECORDING_FRAMES && !LogCanvas.EAT_NONRECORDING_EXCEPTIONS) {
                   ret = was.apply(this, arguments);
-               } catch (e) {
-                  console.error(e, 'from', obj, `.${k}(`, ...arguments, `)`);
+               } else {
+                  try {
+                     ret = was.apply(this, arguments);
+                  } catch (e) {
+                     console.error(e, 'from', obj, `.${k}(`, ...arguments, `)`);
+                  }
                }
+
                try {
                   ret = fn_observe(this, k, arguments, ret);
                } catch (e) {
                   console.error(e);
                   throw e;
                }
+
                return ret;
             };
             continue;
@@ -711,11 +731,12 @@ LogCanvas = (() => {
    }
 
    return {
-      inject_observer: inject_observer,
-      record_frames: record_frames,
-      record_next_frames: record_next_frames,
-      download: download,
-      stop: stop,
+      inject_observer,
+      record_frames,
+      record_next_frames,
+      download,
+      stop,
+      EAT_NONRECORDING_EXCEPTIONS,
    };
 })();
 

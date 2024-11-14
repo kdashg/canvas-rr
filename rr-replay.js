@@ -101,6 +101,8 @@ class Recording {
    snapshots = {};
    elem_info_by_key = [];
    frames = [];
+   c2d = document.createElement('canvas').getContext('2d');
+
 
    static async from_json(json) {
       const ret = Object.assign(new Recording(), json);
@@ -276,8 +278,28 @@ class Recording {
             if (initial == '"') return x.substring(1);
             if (initial == '=') return from_data_snapshot(x.substring(1));
             if (initial == '@') {
-               const ret = this.snapshots[x];
+               let ret = this.snapshots[x];
                if (!ret) new Error("Missing snapshot: " + x);
+
+               const [_, as_type] = x.split(':');
+
+               if (as_type) {
+                  const type_args = as_type.split(',');
+                  switch (type_args[0]) {
+                     case 'ImageData':
+                        const [_,w,h] = type_args;
+                        this.c2d.canvas.width = w;
+                        this.c2d.canvas.height = h;
+                        this.c2d.globalCompositeOperation = 'copy';
+                        this.c2d.drawImage(ret, 0,0);
+                        ret = this.c2d.getImageData(0,0, w,h);
+                        break;
+                     default:
+                        console.warn(`Unhandled type ${type_args[0]}: ${x}`);
+                        break;
+                  }
+               }
+
                return ret;
             }
             if (initial == '$') {
@@ -384,7 +406,15 @@ class Recording {
                check_error('before', obj, call_args);
             }
 
-            const call_ret = func.apply(obj, call_args);
+            let call_ret;
+            try {
+               call_ret = func.apply(obj, call_args);
+            } catch (e) {
+               console.error(
+                  `[${+frame_id+1}:${+call_id+1}]` +
+                  ` ${obj}.${func_name}(${call_args.join(', ')})` +
+                  ` threw`, e, `, expected ${ret}!`);
+            }
             if (ret && typeof ret == 'string') {
                if (ret[0] == '$') {
                   element_map[ret] = call_ret;
