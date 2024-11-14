@@ -1,4 +1,5 @@
 'use strict';
+console.log('[canvas-rr] Loading rr-replay.js...');
 
 const RECORDING_VERSION = 5;
 const BAKE_AND_REHEAT_CALLS = false;

@@ -11,9 +11,12 @@ def to_js_string(src):
 def from_script(src):
    src = to_js_string(src)
 
-   dest = [b'''
+   dest = [b'''\
 (() => {
    if (!(document instanceof HTMLDocument)) return;
+   console.log('[canvas-rr] Injecting rr-record.js inline...');
+
+   // -
 
    const blob = new self.Blob([escaped_file()], // Move this big string to the end.
                               { type: 'text/javascript' });
@@ -21,7 +24,10 @@ def from_script(src):
    let script = document.createElement('script');
    script.src = url;
    script.async = false;
+
    document.documentElement.append(script);
+
+   // -
 
    function escaped_file() {
       return ''', src, b''';
