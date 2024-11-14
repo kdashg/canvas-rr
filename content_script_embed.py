@@ -20,6 +20,7 @@ def from_script(src):
    const url = self.URL.createObjectURL(blob);
    let script = document.createElement('script');
    script.src = url;
+   script.async = false;
    document.documentElement.append(script);
 
    function escaped_file() {

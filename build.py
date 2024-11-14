@@ -32,6 +32,7 @@ def build_content_script(src, dest):
 
 # -
 
-clean();
+clean()
+write_to(WEB_EXT_OUT / 'rr-record.js', (DIR / 'rr-record.js').read_bytes())
 build_content_script(DIR / 'rr-record.js', WEB_EXT_OUT / 'rr-record.content.js')
 print('Build complete.')
