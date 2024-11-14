@@ -422,9 +422,13 @@ LogCanvas = (() => {
          if (!arg) return arg;
          if (arg instanceof Array) return arg.map(x => this.pickle_arg(x, func_name, i));
          if (typeof arg == 'object') return this.pickle_obj(arg, func_name, i);
-         if (typeof arg == 'number' && LIMIT_NUMBER_PRECISION) {
-            arg = +(arg.toPrecision(LIMIT_NUMBER_PRECISION));  // number -> string -> number
+
+         if (typeof arg == 'number' && LIMIT_NUMBER_PRECISION && arg == arg) { // NaN != NaN
+            let p = LIMIT_NUMBER_PRECISION;
+            p = Math.max(p, 1+Math.log10(Math.abs(arg))); // Never round above the decimal point.
+            arg = +(arg.toPrecision(p));  // number -> string -> number
          }
+
          return arg;
       }
 
