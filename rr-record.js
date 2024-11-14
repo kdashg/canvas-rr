@@ -12,8 +12,8 @@ LogCanvas = (() => {
    const LOG_CALL_NAME_LIST = [
       //'drawImage',
       //'getContext',
-      //'getParameter',
       //'linkProgram', 'bindAttribLocation',
+      //'getParameter',
       //'bindBuffer', 'bufferData', 'bufferSubData',
    ];
    const LINK_PROGRAM_INJECT_BIND_ATTRIB_LOCATION = true;
@@ -99,7 +99,11 @@ LogCanvas = (() => {
       let c2d = TO_DATA_URL_C2D;
       c2d.canvas.width = w;
       c2d.canvas.height = h;
-      c2d.drawImage(src, 0, 0, w, h);
+      if (src instanceof ImageData) {
+         c2d.putImageData(src, 0, 0);
+      } else {
+         c2d.drawImage(src, 0, 0, w, h);
+      }
 
       let ret;
       try {
