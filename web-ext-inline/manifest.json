@@ -1,14 +1,13 @@
 {
    "manifest_version": 2,
-   "name": "canvas-rr",
+   "name": "canvas-rr (embed)",
    "version": "0.5",
 
    "content_scripts": [
       {
         "matches": ["https://*/*", "http://*/*", "file://*/*"],
-        "js": ["out/rr-record.js"],
+        "js": ["out/rr-record.content.js"],
         "run_at": "document_start",
-        "world": "MAIN",
         "all_frames": true
       }
    ]

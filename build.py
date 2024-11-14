@@ -8,6 +8,7 @@ import shutil
 
 DIR = pathlib.Path(__file__).parent
 WEB_EXT_OUT = DIR / 'web-ext/out'
+WEB_EXT_OUT_INLINE = DIR / 'web-ext-inline/out'
 
 def write_to(dest, data):
   print(f'   ({len(data)} bytes) => {dest}')
@@ -19,8 +20,11 @@ def clean():
 
   if WEB_EXT_OUT.exists():
     shutil.rmtree(WEB_EXT_OUT)
-
   os.mkdir(WEB_EXT_OUT)
+
+  if WEB_EXT_OUT.exists():
+    shutil.rmtree(WEB_EXT_OUT_INLINE)
+  os.mkdir(WEB_EXT_OUT_INLINE)
 
 
 def build_content_script(src, dest):
@@ -34,5 +38,5 @@ def build_content_script(src, dest):
 
 clean()
 write_to(WEB_EXT_OUT / 'rr-record.js', (DIR / 'rr-record.js').read_bytes())
-build_content_script(DIR / 'rr-record.js', WEB_EXT_OUT / 'rr-record.content.js')
+build_content_script(DIR / 'rr-record.js', WEB_EXT_OUT_INLINE / 'rr-record.content.js')
 print('Build complete.')
