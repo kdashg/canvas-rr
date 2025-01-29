@@ -299,6 +299,7 @@ class Recording {
       const [elem_key, func_name, args, ret] = call;
       //console.log(call);
       if (func_name == 'throw') throw {frame_id, call_id, call};
+      if (func_name.startsWith('get ')) return;
 
       // `call` is fixed. as is `this.snapshots`.
       // `element_map` is mutable though!

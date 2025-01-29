@@ -9,12 +9,15 @@ LogCanvas = (() => {
    const SNAPSHOT_INLINE_LEN = 100;
    const READABLE_SNAPSHOTS = false;
    const DEDUPE_SNAPSHOTS = true;
+   const HOOK_GETTERS = false;
    const LOG_CALL_NAME_LIST = [
       //'drawImage',
       //'getContext',
       //'linkProgram', 'bindAttribLocation',
       //'getParameter',
       //'bindBuffer', 'bufferData', 'bufferSubData',
+      //'fillText',
+      //'texImage2D',
    ];
    const LINK_PROGRAM_INJECT_BIND_ATTRIB_LOCATION = true;
    const GET_PARAMETER_OVERRIDES = {};
@@ -593,6 +596,21 @@ LogCanvas = (() => {
          if (DONT_HOOK[k]) continue;
 
          const desc = descs[k];
+         if (HOOK_GETTERS && desc.get) {
+            //console.log(`hooking getter: ${obj.constructor.name}.${k}`);
+            const was = desc.get;
+            desc.get = function() {
+               const ret = was.call(this);
+               try {
+                  fn_observe(this, 'get ' + k, [], ret);
+               } catch (e) {
+                  console.error(e);
+                  throw e;
+               }
+               return ret;
+            };
+            continue;
+         }
          if (desc.set) {
             //console.log(`hooking setter: ${obj.constructor.name}.${k}`);
             const was = desc.set;
@@ -655,6 +673,7 @@ LogCanvas = (() => {
 
    const HOOK_LIST = [
       HTMLCanvasElement,
+      //HTMLImageElement,
       OffscreenCanvas,
       CanvasRenderingContext2D,
       Path2D,
@@ -673,7 +692,7 @@ LogCanvas = (() => {
    const is_hooked_set = new WeakSet();
 
    function inject_observer() {
-      console.log(`[LogCanvas@${window.origin}] Injecting for`, window.location);
+      console.log(`[LogCanvas@${window.origin}] Injecting for`, window.location, ':', window.LogCanvas);
 
       function fn_observe(obj, k, args, ret) {
          if (should_ignore_set.has(obj)) return ret;
