@@ -189,8 +189,8 @@ LogCanvas = (() => {
       if (obj instanceof ArrayBuffer) {
          view = new Uint8Array(obj);
       } else if (obj instanceof DataView) {
-         view = new Uint8Array(obj, obj.byteOffset, obj.byteLength);
-      } else if (obj.buffer instanceof ArrayBuffer) {
+         view = new Uint8Array(obj.buffer, obj.byteOffset, obj.byteLength);
+      } else if (ArrayBuffer.isView(obj)) {
          view = obj;
       } else {
          return undefined;
