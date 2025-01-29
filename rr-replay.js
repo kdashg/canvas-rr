@@ -25,19 +25,66 @@ function invoke(fn) {
     return fn();
 }
 
-const Base64 = {
-   encode: dec_ab => {
-      const dec_u8a = new Uint8Array(dec_ab);
-      const dec_bstr = String.fromCodePoint(...dec_u8a);
-      const enc = btoa(dec_bstr);
-      return enc;
-   },
-   decode: enc => {
-      const dec_bstr = atob(enc);
-      const dec_u8a = new Uint8Array([].map.call(dec_bstr, x => x.codePointAt(0)));
-      return dec_u8a.buffer;
-   },
-};
+// -
+
+function Uint8Array_prototype_toBase64_polyfill() {
+   const data_u8a = this;
+
+   let remaining = data_u8a;
+   let data_bstr = "";
+   while (remaining.length) {
+      const chunk = remaining.slice(0, 1000);
+      remaining = remaining.slice(1000);
+      data_bstr += String.fromCodePoint(...chunk);
+   }
+   const base64_str = btoa(data_bstr);
+   return base64_str;
+}
+
+function Uint8Array_fromBase64_polyfill(base64_str) {
+   const data_bstr = atob(base64_str);
+   const data_u8a = new Uint8Array([].map.call(data_bstr, x => x.codePointAt(0)));
+   return data_u8a;
+}
+
+// -
+
+{
+   const ref_data = new Uint8Array([ 226, 202, 61, 49, 158 ]);
+   const ref_base64 = '4so9MZ4=';
+
+   const was_base64 = Uint8Array_prototype_toBase64_polyfill.call(ref_data);
+   console.assert(was_base64 == ref_base64, {was_base64, ref_base64});
+
+   const was_data = Uint8Array_fromBase64_polyfill(ref_base64);
+   console.assert(was_data.toString() == ref_data.toString(), {was_data, ref_data});
+   
+   // -
+   
+   const INJECT_BASE64_POLYFILLS = false;
+   if (INJECT_BASE64_POLYFILLS) {
+      Uint8Array.prototype.toBase64 = Uint8Array.prototype.toBase64 || Uint8Array_prototype_toBase64_polyfill;
+      Uint8Array.fromBase64 = Uint8Array.fromBase64 || Uint8Array_fromBase64_polyfill;
+   }
+}
+
+// -
+
+function Uint8Array_toBase64(data_u8a) {
+   if (data_u8a.toBase64) {
+      return data_u8a.toBase64();
+   }
+   return Uint8Array_prototype_toBase64_polyfill.call(data_u8a);
+}
+
+function Uint8Array_fromBase64(base64_str) {
+   if (Uint8Array.fromBase64) {
+      return Uint8Array.fromBase64(base64_str);
+   }
+   return Uint8Array_fromBase64_polyfill(base64_str);
+}
+
+// -
 
 function from_data_snapshot(str) {
    let [type, data] = split_once(str, ':');
@@ -49,7 +96,7 @@ function from_data_snapshot(str) {
       if (data[0] == '*') {
          data = parseInt(data.slice(1));
       } else if (data[0] == '^') {
-         data = Base64.decode(data.slice(1));
+         data = Uint8Array_fromBase64(data.slice(1)).buffer;
       } else {
          data = JSON.parse('[' + data + ']');
       }

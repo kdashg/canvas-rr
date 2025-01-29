@@ -162,51 +162,102 @@ LogCanvas = (() => {
 
    // -
 
-   const Base64 = {
-      encode: dec_ab => {
-         const dec_u8a = new Uint8Array(dec_ab);
-         let remaining = dec_u8a;
-         let dec_bstr = "";
-         while (remaining.length) {
-            const chunk = remaining.slice(0, 1000);
-            remaining = remaining.slice(1000);
-            dec_bstr += String.fromCodePoint(...chunk);
-         }
-         const enc = btoa(dec_bstr);
-         return enc;
-      },
-      decode: enc => {
-         const dec_bstr = atob(enc);
-         const dec_u8a = new Uint8Array([].map.call(dec_bstr, x => x.codePointAt(0)));
-         return dec_u8a.buffer;
-      },
-   };
+   function Uint8Array_prototype_toBase64_polyfill() {
+      const data_u8a = this;
+
+      let remaining = data_u8a;
+      let data_bstr = "";
+      while (remaining.length) {
+         const chunk = remaining.slice(0, 1000);
+         remaining = remaining.slice(1000);
+         data_bstr += String.fromCodePoint(...chunk);
+      }
+      const base64_str = btoa(data_bstr);
+      return base64_str;
+   }
+
+   function Uint8Array_fromBase64_polyfill(base64_str) {
+      const data_bstr = atob(base64_str);
+      const data_u8a = new Uint8Array([].map.call(data_bstr, x => x.codePointAt(0)));
+      return data_u8a;
+   }
+
+   // -
+
+   {
+      const ref_data = new Uint8Array([ 226, 202, 61, 49, 158 ]);
+      const ref_base64 = '4so9MZ4=';
+
+      const was_base64 = Uint8Array_prototype_toBase64_polyfill.call(ref_data);
+      console.assert(was_base64 == ref_base64, {was_base64, ref_base64});
+
+      const was_data = Uint8Array_fromBase64_polyfill(ref_base64);
+      console.assert(was_data.toString() == ref_data.toString(), {was_data, ref_data});
+
+      // -
+
+      const INJECT_BASE64_POLYFILLS = false;
+      if (INJECT_BASE64_POLYFILLS) {
+         Uint8Array.prototype.toBase64 = Uint8Array.prototype.toBase64 || Uint8Array_prototype_toBase64_polyfill;
+         Uint8Array.fromBase64 = Uint8Array.fromBase64 || Uint8Array_fromBase64_polyfill;
+      }
+   }
+
+   // -
+
+   function Uint8Array_toBase64(data_u8a) {
+      if (data_u8a.toBase64) {
+         return data_u8a.toBase64();
+      }
+      return Uint8Array_prototype_toBase64_polyfill.call(data_u8a);
+   }
+
+   function Uint8Array_fromBase64(base64_str) {
+      if (Uint8Array.fromBase64) {
+         return Uint8Array.fromBase64(base64_str);
+      }
+      return Uint8Array_fromBase64_polyfill(base64_str);
+   }
+
+   // -
+
+   function typed_view(ctor, obj) {
+      if (ArrayBuffer.isView(obj)) {
+         return new ctor(obj.buffer, obj.byteOffset, obj.byteLength / ctor.BYTES_PER_ELEMENT);
+      }
+      if (obj instanceof ArrayBuffer) {
+         return new ctor(obj);
+      }
+      return undefined;
+   }
 
    function snapshot_if_array_buffer(obj, length_only) {
       const type = obj.constructor.name;
 
-      let view;
-      if (obj instanceof ArrayBuffer) {
-         view = new Uint8Array(obj);
-      } else if (obj instanceof DataView) {
-         view = new Uint8Array(obj.buffer, obj.byteOffset, obj.byteLength);
-      } else if (ArrayBuffer.isView(obj)) {
-         view = obj;
-      } else {
-         return undefined;
+      let view = obj;
+      if (obj instanceof ArrayBuffer || obj instanceof DataView) {
+         view = typed_view(Uint8Array, obj);
       }
+      if (!view) return undefined;
 
       if (length_only) {
          return [type + ':*' + view.length];
       }
+
       let str;
       if (READABLE_SNAPSHOTS) {
          str = view.toString();
       } else {
-         str = '^' + Base64.encode(view.buffer);
+         if (!(view instanceof Uint8Array)) {
+            view = typed_view(Uint8Array, view);
+         }
+         str = '^' + Uint8Array_toBase64(view);
       }
       let hash;
       if (DEDUPE_SNAPSHOTS) {
+         if (!(view instanceof Uint8Array)) {
+            view = typed_view(Uint8Array, view);
+         }
          // We must hash the type in too!
          // I don't think it's worth it to de-dupe data across types.
          hash = fnv1a_32(type);
@@ -233,7 +284,7 @@ LogCanvas = (() => {
       let bytes = input;
       if (typeof bytes == 'string') {
          bytes = new Uint8Array([].map.call(bytes, x => x.codePointAt(0)));
-      } else if (bytes.buffer instanceof ArrayBuffer) {
+      } else if (ArrayBuffer.isView(bytes)) {
          bytes = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       } else if (bytes instanceof ArrayBuffer) {
          bytes = new Uint8Array(bytes.buffer);
