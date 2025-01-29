@@ -484,6 +484,8 @@ LogCanvas = (() => {
       }
 
       pickle_call(obj, func_name, call_args, call_ret) {
+         const begin = performance.now();
+
          if (LOG_CALL_NAME_LIST.includes(func_name)) {
             console.log('pickle_call', ...arguments);
          }
@@ -491,6 +493,11 @@ LogCanvas = (() => {
          const args = [].map.call(call_args, (x,i) => this.pickle_arg(x, func_name, i));
          const ret = this.pickle_arg(call_ret, func_name, -1);
          this.new_call(obj_key, func_name, args, ret);
+
+         const ms = performance.now() - begin;
+         if (ms >= 10.0) {
+            console.warn(`pickle_call(`, {obj, func_name, call_args, call_ret}, `) took ${ms}ms`);
+         }
       }
 
       to_json_arr() {
