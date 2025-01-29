@@ -6,6 +6,7 @@ const BAKE_AND_REHEAT_CALLS = false;
 const BAKE_ASSUME_OBJ_FUNC_LOOKUP_IMMUTABLE = true;
 const DEDUPE_STRINGS = true;
 const DEDUPE_CALLS = true;
+const FORCE_PRESERVE_DRAWING_BUFFER = true;
 
 let SPEW_ON_GL_ERROR;
 //SPEW_ON_GL_ERROR = true;
@@ -437,13 +438,29 @@ class Recording {
          const replay_spew = window._CRR_REPLAY_SPEW;
 
          return (element_map, obj, frame_id, call_id) => { // Reheat an actual call!
-            const call_args = reheat_call_args(element_map);
+            let call_args = reheat_call_args(element_map);
             const func = baked_func || obj[func_name];
             if (!func) {
                console.log("Warning: Missing func: " + obj.constructor.name + '.' + func_name);
                return;
             }
 
+            // -
+
+            if (FORCE_PRESERVE_DRAWING_BUFFER) {
+               const is_obj_canvas = (obj instanceof HTMLCanvasElement ||
+                                     obj instanceof OffscreenCanvas);
+               if (is_obj_canvas && func_name == 'getContext' &&
+                   call_args[0] && call_args[0].startsWith('webgl')) {
+                  call_args = [
+                     call_args[0],
+                     Object.assign({}, call_args[1])
+                  ];
+                  call_args[1].preserveDrawingBuffer = true;
+               }
+            }
+
+            // -
 
             if (replay_spew) {
                console.log(`${ret || '()'} = ${obj}.${func_name}(`, ...call_args, `)`);
@@ -452,6 +469,8 @@ class Recording {
             if (SPEW_ON_GL_ERROR) {
                check_error('before', obj, call_args);
             }
+
+            // -
 
             let call_ret;
             try {
