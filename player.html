@@ -26,6 +26,7 @@ Status: <span id='e_status'>-</span>
 <button onclick='reset_button()'>Reset</button>
 <button onclick='play_button()'>Play</button>
 <button onclick='show_snapshots()'>Show snapshots</button>
+<button onclick='export_html()'>Export to HTML</button>
 </div>
 <hr/>
 <div style='flex:1; contain:size; display:flex;'>
@@ -115,11 +116,11 @@ class SplitLogger {
    }
 };
 
-async function file_input_changed(blob) {
+async function file_input_changed(file) {
    const slog = new SplitLogger('file_input_changed');
 
    e_status.textContent = 'Reading...';
-   let text = await blob.text();
+   let text = await file.text();
    slog.log(`Read ${to_suffixed(text.length)} bytes.`);
 
    e_status.textContent = 'Parsing...';
@@ -129,6 +130,7 @@ async function file_input_changed(blob) {
 
    e_status.textContent = 'Loading...';
    RECORDING = await Recording.from_json(json);
+   RECORDING.name = file.name;
    slog.log(`Loaded ${RECORDING.frames.length} frames.`);
 
    const list_e_frame_info = RECORDING.list_e_frame_info = [];
@@ -357,6 +359,84 @@ async function show_snapshots() {
       show_snapshot(key);
    }
 }
+
+// -
+
+async function export_html() {
+   if (!RECORDING) {
+      alert("No recording loaded.");
+      return;
+   }
+   const html = [];
+   html.push(`\
+<!DOCTYPE html>
+<html>
+   <head>
+      <meta charset=utf-8>
+      <title>HTML ${RECORDING.name}<title>
+   </head>
+   <body>`
+   );
+
+   const html_parts = [];
+   const script_parts = [];
+   for (const [elem_key, info] of Object.entries(RECORDING.elem_info_by_key)) {
+      switch (info.type) {
+      case 'HTMLCanvasElement':
+         html_parts.push(
+            `<canvas id='${elem_key}' width=${info.width} height=${info.height}>`
+         );
+         break;
+
+      case 'OffscreenCanvas':
+         script_parts.push(
+            `window['${elem_key}'] = new OffscreenCanvas(${info.width}, ${info.height});`
+         );
+         break;
+
+      default:
+         console.assert(false, {elem_key, info});
+         break;
+      }
+   }
+
+   // -
+
+   for (const [key,snapshot] of Object.entries(RECORDING.snapshots)) {
+      switch (snapshot.constructor.name) {
+      case 'HTMLImageElement':
+         html_parts.push(
+            `<img id='${key}'>`
+         );
+         script_parts.push(
+            `load_snapshot
+            `if (!window['${key}'].src) { window['${key}'].src = SNAPSHOT_BY_KEY['${key}']; }`
+         );
+         break;
+      case 'Object':
+         script_parts.push(
+            `window['${key}'] = ${JSON.stringify(snapshot)};`
+         );
+         break;
+   }
+
+   SNAPSHOTS_BY_KEY
+
+
+   const html = `\
+<!DOCTYPE html>
+<html>
+   <head>
+      <meta charset=utf-8>
+      <title>HTML ${RECORDING.name}<title>
+   </head>
+   <body>
+   </body>
+</html>
+`;
+}
+
+// -
 
 function step_frame() {
    let [fid,cid] = NOW_PLAYING.next_call;

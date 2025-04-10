@@ -93,6 +93,34 @@ function to_suffixed(val, fixed) {
    return `${scaled.toFixed(fixed)}${suffix}`;
 }
 
+async function load_snapshot(recording, key) {
+   const str = recording.snapshots[key].join('');
+   let ret = window[key];
+
+   if (str.startsWith('data:')) {
+      ret = ret || document.createElement('img');
+      if (ret.src) {
+         console.warn(`Snapshot img "${key}" already has a src, using that...`);
+      } else {
+         ret.src = str;
+      }
+      try {
+         await ret.decode();
+      } catch (e) {
+         console.error(`Failed to load "${key}":`, ret, 'str:', str);
+         //throw e;
+      }
+   } else {
+      if (ret) {
+         console.warn(`Snapshot "${key}" already has data, using that...`);
+      } else {
+         ret = from_data_snapshot(str);
+      }
+   }
+   window[key] = ret;
+   return ret;
+}
+
 class Recording {
    // String prefixes:
    // @: snapshot key
@@ -113,25 +141,27 @@ class Recording {
 
       const decode_proms = [];
       for (const k in ret.snapshots) {
-         decode_proms.push( (async () => {
-            const str = ret.snapshots[k].join('');
-            const obj = await (async () => {
-               if (str.startsWith('data:')) {
-                  const elem = document.createElement('img');
-                  elem.src = str;
-                  try {
-                     await elem.decode();
-                  } catch (e) {
-                     console.error('Failed to load:', elem, 'str:', str);
-                     //throw e;
+         decode_proms.push(
+            (async () => {
+               const str = ret.snapshots[k].join('');
+               const obj = await (async () => {
+                  if (str.startsWith('data:')) {
+                     const elem = document.createElement('img');
+                     elem.src = str;
+                     try {
+                        await elem.decode();
+                     } catch (e) {
+                        console.error('Failed to load:', elem, 'str:', str);
+                        //throw e;
+                     }
+                     return elem;
                   }
-                  return elem;
-               }
 
-               return from_data_snapshot(str);
-            })();
-            ret.snapshots[k] = obj;
-         })() );
+                  return from_data_snapshot(str);
+               })();
+               ret.snapshots[k] = obj;
+            })()
+         );
       }
       await Promise.all(decode_proms);
 
